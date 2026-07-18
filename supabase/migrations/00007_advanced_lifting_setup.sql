@@ -1,16 +1,29 @@
--- Advanced Lifting Features Migration
--- Adds set_type column for different set categories and exercise notes
+-- Advanced Lifting Features Migration (idempotent — safe to re-run)
+-- Adds set_type column for set categories and exercise notes.
+-- Using ADD COLUMN IF NOT EXISTS + guard checks so re-running never errors.
 
--- Part 1: Update sets table to support set types
-ALTER TABLE public.sets
-  ADD COLUMN set_type TEXT NOT NULL DEFAULT 'working',
-  ADD CONSTRAINT set_type_check CHECK (set_type IN ('warmup', 'working', 'drop_set', 'failure'));
+-- Part 1: set_type on sets
+ALTER TABLE public.sets ADD COLUMN IF NOT EXISTS set_type TEXT;
 
--- Part 2: Update exercises table to add notes column for equipment/position details
-ALTER TABLE public.exercises
-  ADD COLUMN notes TEXT NULL;
+UPDATE public.sets SET set_type = 'working' WHERE set_type IS NULL;
 
--- Part 3: Update exercises table RLS to allow note updates
+ALTER TABLE public.sets ALTER COLUMN set_type SET DEFAULT 'working';
+ALTER TABLE public.sets ALTER COLUMN set_type SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'set_type_check'
+  ) THEN
+    ALTER TABLE public.sets
+      ADD CONSTRAINT set_type_check CHECK (set_type IN ('warmup', 'working', 'drop_set', 'failure'));
+  END IF;
+END $$;
+
+-- Part 2: notes on exercises
+ALTER TABLE public.exercises ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- Part 3: exercises RLS — allow note updates
 DROP POLICY IF EXISTS exercises_update_own ON public.exercises;
 CREATE POLICY "exercises_update_own" ON public.exercises
   FOR UPDATE USING (
@@ -21,7 +34,7 @@ CREATE POLICY "exercises_update_own" ON public.exercises
     )
   );
 
--- Part 4: Update sets table RLS to allow set_type field updates
+-- Part 4: sets RLS — allow set_type field updates
 DROP POLICY IF EXISTS sets_update_own ON public.sets;
 CREATE POLICY "sets_update_own" ON public.sets
   FOR UPDATE USING (
@@ -33,7 +46,7 @@ CREATE POLICY "sets_update_own" ON public.sets
     )
   );
 
--- Part 5: Add RLS policies for insert with set_type
+-- Part 5: sets RLS — allow insert with set_type
 DROP POLICY IF EXISTS sets_insert_own ON public.sets;
 CREATE POLICY "sets_insert_own" ON public.sets
   FOR INSERT WITH CHECK (
@@ -44,6 +57,3 @@ CREATE POLICY "sets_insert_own" ON public.sets
         AND w.user_id = auth.uid()
     )
   );
-
--- Part 6: Grant read access for existing policy compliance
--- (Policies for select/insert already cover the tables, no changes needed)
