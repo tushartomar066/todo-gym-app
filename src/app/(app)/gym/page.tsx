@@ -1,22 +1,57 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   getAllWorkoutsWithDetails,
   getPersonalRecords,
   addExercise,
   addSet,
   toggleSetComplete,
+  getPreviousExerciseData,
+  getUniqueExerciseNames,
+  updateExerciseNotes,
   type PersonalRecord,
 } from '@/lib/actions'
-import { type Workout, type Exercise, type WorkoutSet } from '@/types/database'
+import { type Workout, type Exercise, type WorkoutSet, type SetType } from '@/types/database'
+import ExerciseCombobox from '@/components/gym/ExerciseCombobox'
+import RestTimerBar from '@/components/gym/RestTimerBar'
 import { Plus, Dumbbell, Check, X, Loader2, ChevronDown, ChevronUp, Calendar, Trophy } from 'lucide-react'
 
 interface SetFormState {
   exerciseId: string
   weight: string
   reps: string
+  setType: SetType
 }
+
+interface PreviousSession {
+  exerciseName: string
+  date: string | null
+  sets: { weight: number | null; reps: number | null; set_type: SetType }[]
+}
+
+const REST_SECONDS = 90
+
+const SET_TYPE_OPTIONS: {
+  type: SetType
+  label: string
+  short: string
+  chip: string
+  rowBorder: string
+}[] = [
+  { type: 'warmup',   label: 'Warmup', short: 'W', chip: 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400',     rowBorder: 'border-l-yellow-500/50' },
+  { type: 'working',  label: 'Normal', short: 'N', chip: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',  rowBorder: 'border-l-emerald-500/50' },
+  { type: 'drop_set', label: 'Drop',   short: 'D', chip: 'bg-sky-500/10 border-sky-500/20 text-sky-400',             rowBorder: 'border-l-sky-500/50' },
+  { type: 'failure',  label: 'Failure',short: 'F', chip: 'bg-red-500/10 border-red-500/20 text-red-400',             rowBorder: 'border-l-red-500/50' },
+]
+
+const SET_TYPE_CHIP: Record<SetType, string> = Object.fromEntries(
+  SET_TYPE_OPTIONS.map(o => [o.type, o.chip]),
+) as Record<SetType, string>
+
+const SET_TYPE_ROW: Record<SetType, string> = Object.fromEntries(
+  SET_TYPE_OPTIONS.map(o => [o.type, o.rowBorder]),
+) as Record<SetType, string>
 
 function formatDate(dateStr: string): string {
   const today = new Date().toISOString().split('T')[0]
@@ -26,6 +61,25 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
     weekday: 'short', month: 'short', day: 'numeric',
   })
+}
+
+// Total volume = weight × reps across completed WORKING sets.
+function calcVolume(sets: WorkoutSet[]): number {
+  return sets
+    .filter(s => s.is_completed && s.set_type === 'working')
+    .reduce((sum, s) => sum + (Number(s.weight) || 0) * (Number(s.reps) || 0), 0)
+}
+
+// Estimated 1RM (Epley) from the best completed WORKING set.
+function calcE1RM(sets: WorkoutSet[]): number | null {
+  let best = 0
+  for (const s of sets) {
+    if (s.is_completed && s.set_type === 'working' && s.weight && s.reps) {
+      const e1 = Number(s.weight) * (1 + Number(s.reps) / 30)
+      if (e1 > best) best = e1
+    }
+  }
+  return best > 0 ? Math.round(best * 10) / 10 : null
 }
 
 type Tab = 'log' | 'prs'
@@ -42,9 +96,35 @@ export default function GymPage() {
   const [addingExercise, setAddingExercise]   = useState(false)
   const [setForm, setSetForm]               = useState<SetFormState | null>(null)
   const [collapsed, setCollapsed]           = useState<Set<string>>(new Set())
+  const [exerciseNames, setExerciseNames]   = useState<string[]>([])
+  const [prevMap, setPrevMap]               = useState<Map<string, PreviousSession>>(new Map())
+  const [saving, setSaving]                 = useState(false)
+
+  // Rest timer
+  const [restSeconds, setRestSeconds] = useState(0)
+  const restRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const today = new Date().toISOString().split('T')[0]
 
+  // ── rest timer countdown ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (restSeconds <= 0) {
+      if (restRef.current) { clearInterval(restRef.current); restRef.current = null }
+      return
+    }
+    restRef.current = setInterval(() => {
+      setRestSeconds(s => (s > 1 ? s - 1 : 0))
+    }, 1000)
+    return () => {
+      if (restRef.current) { clearInterval(restRef.current); restRef.current = null }
+    }
+  }, [restSeconds])
+
+  const startRest = (sec = REST_SECONDS) => setRestSeconds(sec)
+  const adjustRest = (delta: number) => setRestSeconds(s => Math.max(0, s + delta))
+  const stopRest = () => setRestSeconds(0)
+
+  // ── data fetching ───────────────────────────────────────────────────────────
   const fetchWorkouts = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -56,6 +136,9 @@ export default function GymPage() {
       setSetsMap(map)
       const pastIds = new Set(data.filter(w => w.date !== today).map(w => w.id))
       setCollapsed(pastIds)
+
+      const names = await getUniqueExerciseNames()
+      setExerciseNames(names)
     } catch {
       setError('Failed to load workouts')
     } finally {
@@ -81,6 +164,7 @@ export default function GymPage() {
     if (tab === 'prs') fetchPrs()
   }, [tab, fetchPrs])
 
+  // ── exercise handlers ────────────────────────────────────────────────────────
   const handleAddExercise = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newExerciseName.trim()) return
@@ -88,19 +172,28 @@ export default function GymPage() {
     setAddingExercise(true)
     try {
       const ex = await addExercise(newExerciseName.trim())
+      if (!ex) throw new Error('Failed to add exercise')
       setNewExerciseName('')
-      setSetsMap(prev => new Map(prev).set(ex!.id, []))
+      setSetsMap(prev => new Map(prev).set(ex.id, []))
+
       setWorkouts(prev => {
         const todayWorkout = prev.find(w => w.date === today)
         if (todayWorkout) {
           return prev.map(w =>
             w.date === today
-              ? { ...w, exercises: [...(w.exercises || []), { ...ex!, sets: [] }] }
+              ? { ...w, exercises: [...(w.exercises || []), { ...ex, sets: [] }] }
               : w
           )
         }
-        return [{ id: ex!.workout_id, user_id: '', date: today, notes: null, created_at: '', updated_at: '', exercises: [{ ...ex!, sets: [] }] }, ...prev]
+        return [{ id: ex.workout_id, user_id: '', date: today, notes: null, created_at: '', updated_at: '', exercises: [{ ...ex, sets: [] }] }, ...prev]
       })
+
+      // Pull in the previous session for progressive-overload hints.
+      const prev = await getPreviousExerciseData(ex.name)
+      if (prev) setPrevMap(p => new Map(p).set(ex.id, prev))
+
+      const names = await getUniqueExerciseNames()
+      setExerciseNames(names)
     } catch {
       setError('Failed to add exercise')
     } finally {
@@ -108,6 +201,26 @@ export default function GymPage() {
     }
   }
 
+  const updateLocalExerciseNotes = (exerciseId: string, notes: string | null) => {
+    setWorkouts(prev => prev.map(w => ({
+      ...w,
+      exercises: (w.exercises || []).map(ex =>
+        ex.id === exerciseId ? { ...ex, notes } : ex
+      ),
+    })))
+  }
+
+  const handleNotesBlur = async (exerciseId: string, value: string) => {
+    const trimmed = value.trim()
+    try {
+      await updateExerciseNotes(exerciseId, trimmed || null)
+      updateLocalExerciseNotes(exerciseId, trimmed || null)
+    } catch {
+      setError('Failed to save notes')
+    }
+  }
+
+  // ── set handlers ─────────────────────────────────────────────────────────────
   const handleSubmitSet = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!setForm) return
@@ -118,8 +231,9 @@ export default function GymPage() {
       return
     }
     setError(null)
+    setSaving(true)
     try {
-      const newSet = await addSet(setForm.exerciseId, weight, reps)
+      const newSet = await addSet(setForm.exerciseId, weight, reps, setForm.setType)
       setSetsMap(prev => {
         const map = new Map(prev)
         map.set(setForm.exerciseId, [...(map.get(setForm.exerciseId) || []), newSet!])
@@ -128,6 +242,8 @@ export default function GymPage() {
       setSetForm(null)
     } catch {
       setError('Failed to add set')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -142,8 +258,29 @@ export default function GymPage() {
         ))
         return map
       })
+      // Start the rest timer only when a set is completed (not when unchecked).
+      if (!isCompleted) startRest(REST_SECONDS)
     } catch {
       setError('Failed to update set')
+    }
+  }
+
+  // ── auto-fill today's empty sets from the previous session ───────────────────
+  const autoFillFromPrevious = async (exerciseId: string) => {
+    const prev = prevMap.get(exerciseId)
+    if (!prev || prev.sets.length === 0) return
+    setSaving(true)
+    setError(null)
+    try {
+      for (const s of prev.sets) {
+        if (s.weight == null || s.reps == null) continue
+        await addSet(exerciseId, Number(s.weight), Number(s.reps), s.set_type)
+      }
+      await fetchWorkouts()
+    } catch {
+      setError('Failed to auto-fill sets')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -156,7 +293,7 @@ export default function GymPage() {
   }
 
   return (
-    <div className="max-w-2xl w-full space-y-6">
+    <div className="max-w-2xl w-full space-y-6 pb-24 md:pb-4">
 
       {/* Header */}
       <div>
@@ -186,19 +323,17 @@ export default function GymPage() {
         </button>
       </div>
 
-      {/* ── LOG TAB ────────────────────────────────────────── */}
+      {/* ── LOG TAB ─────────────────────────────────────────────────────────── */}
       {tab === 'log' && (
         <>
           {/* Add exercise form */}
           <form onSubmit={handleAddExercise} className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <p className="text-xs text-gray-500 mb-3 uppercase tracking-wider font-semibold">Add to today's workout</p>
             <div className="flex flex-col sm:flex-row gap-3">
-              <input
-                type="text"
+              <ExerciseCombobox
                 value={newExerciseName}
-                onChange={e => setNewExerciseName(e.target.value)}
-                placeholder="Exercise name (e.g. Bench Press)"
-                className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-gray-200 placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                onChange={setNewExerciseName}
+                suggestions={exerciseNames}
               />
               <button
                 type="submit"
@@ -274,26 +409,69 @@ export default function GymPage() {
                           exercises.map(exercise => {
                             const sets = setsMap.get(exercise.id) || []
                             const doneCount = sets.filter(s => s.is_completed).length
+                            const prev = prevMap.get(exercise.id)
+                            const volume = calcVolume(sets)
+                            const e1rm = calcE1RM(sets)
+
                             return (
                               <div key={exercise.id} className="pt-4 space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <div>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
                                     <h3 className="text-sm font-semibold text-gray-200">{exercise.name}</h3>
                                     <p className="text-xs text-gray-500 mt-0.5">
                                       {sets.length} set{sets.length !== 1 ? 's' : ''} · {doneCount} done
                                     </p>
                                   </div>
-                                  {isToday && (
-                                    <button
-                                      onClick={() => setSetForm({ exerciseId: exercise.id, weight: '', reps: '' })}
-                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium rounded-lg border border-emerald-500/20 transition-colors"
-                                    >
-                                      <Plus className="h-3.5 w-3.5" />
-                                      Add Set
-                                    </button>
-                                  )}
+                                  <div className="flex items-center gap-2">
+                                    {prev && prev.sets.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => autoFillFromPrevious(exercise.id)}
+                                        disabled={saving}
+                                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium rounded-lg border border-emerald-500/20 transition-colors disabled:opacity-50"
+                                        title="Copy last session's sets into today"
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                        Auto-fill
+                                      </button>
+                                    )}
+                                    {isToday && (
+                                      <button
+                                        onClick={() => setSetForm({ exerciseId: exercise.id, weight: '', reps: '', setType: 'working' })}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-medium rounded-lg border border-emerald-500/20 transition-colors"
+                                      >
+                                        <Plus className="h-3.5 w-3.5" />
+                                        Add Set
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
 
+                                {/* Previous session hint */}
+                                {prev && prev.sets.length > 0 && (
+                                  <div className="text-xs text-gray-500">
+                                    <span className="text-gray-600">Last time{prev.date ? ` (${formatDate(prev.date)})` : ''}: </span>
+                                    {prev.sets.map((s, i) => (
+                                      <span key={i} className="text-gray-400">
+                                        {i > 0 ? ', ' : ''}
+                                        {s.weight ?? '—'}kg × {s.reps ?? '—'}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Notes (today's exercises only) */}
+                                {isToday && (
+                                  <input
+                                    type="text"
+                                    defaultValue={exercise.notes ?? ''}
+                                    onBlur={e => handleNotesBlur(exercise.id, e.target.value)}
+                                    placeholder="Notes (e.g. seat at position 4)"
+                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-gray-300 placeholder-gray-600 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                  />
+                                )}
+
+                                {/* Set form */}
                                 {setForm?.exerciseId === exercise.id && (
                                   <form
                                     onSubmit={handleSubmitSet}
@@ -320,9 +498,28 @@ export default function GymPage() {
                                       required
                                       className="w-full sm:w-24 bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-gray-200 placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                     />
+                                    {/* Set type selector */}
+                                    <div className="col-span-2 sm:col-span-1 flex gap-1">
+                                      {SET_TYPE_OPTIONS.map(o => (
+                                        <button
+                                          key={o.type}
+                                          type="button"
+                                          onClick={() => setSetForm(f => f && { ...f, setType: o.type })}
+                                          title={o.label}
+                                          className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                                            setForm.setType === o.type
+                                              ? o.chip
+                                              : 'bg-gray-900 border-gray-700 text-gray-500 hover:text-gray-300'
+                                          }`}
+                                        >
+                                          {o.short}
+                                        </button>
+                                      ))}
+                                    </div>
                                     <button
                                       type="submit"
-                                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors"
+                                      disabled={saving}
+                                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
                                     >
                                       Save
                                     </button>
@@ -336,6 +533,7 @@ export default function GymPage() {
                                   </form>
                                 )}
 
+                                {/* Set rows */}
                                 {sets.length === 0 ? (
                                   <p className="text-xs text-gray-600 pl-1">No sets yet</p>
                                 ) : (
@@ -349,14 +547,19 @@ export default function GymPage() {
                                     {sets.map((set, i) => (
                                       <div
                                         key={set.id}
-                                        className={`grid grid-cols-4 items-center px-3 py-2 rounded-xl text-sm transition-colors ${
+                                        className={`grid grid-cols-4 items-center px-3 py-2 rounded-xl text-sm border-l-2 transition-colors ${
                                           set.is_completed
-                                            ? 'bg-emerald-500/5 border border-emerald-500/10 text-gray-500'
-                                            : 'bg-gray-800 border border-gray-700 text-gray-200'
+                                            ? 'bg-emerald-500/5 border-gray-800 text-gray-500'
+                                            : `bg-gray-800 border-gray-700 ${SET_TYPE_ROW[set.set_type]} text-gray-200`
                                         }`}
                                       >
-                                        <span className={`font-semibold ${set.is_completed ? 'text-gray-600' : 'text-gray-300'}`}>
-                                          {i + 1}
+                                        <span className="flex items-center gap-2">
+                                          <span className={`font-semibold ${set.is_completed ? 'text-gray-600' : 'text-gray-300'}`}>
+                                            {i + 1}
+                                          </span>
+                                          <span className={`text-[10px] uppercase font-bold px-1 py-0.5 rounded ${SET_TYPE_CHIP[set.set_type]}`}>
+                                            {set.set_type === 'drop_set' ? 'D' : set.set_type === 'working' ? 'N' : set.set_type === 'warmup' ? 'W' : 'F'}
+                                          </span>
                                         </span>
                                         <span className={set.is_completed ? 'line-through' : ''}>{set.weight} kg</span>
                                         <span className={set.is_completed ? 'line-through' : ''}>{set.reps} reps</span>
@@ -379,6 +582,20 @@ export default function GymPage() {
                                     ))}
                                   </div>
                                 )}
+
+                                {/* Metrics: volume + estimated 1RM */}
+                                {(volume > 0 || e1rm) && (
+                                  <div className="flex flex-wrap gap-3 pt-1">
+                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800/60 border border-gray-800">
+                                      <span className="text-xs text-gray-500 uppercase tracking-wider">Volume</span>
+                                      <span className="text-sm font-semibold text-gray-200">{volume} kg</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800/60 border border-gray-800">
+                                      <span className="text-xs text-gray-500 uppercase tracking-wider">Est. 1RM</span>
+                                      <span className="text-sm font-semibold text-emerald-400">{e1rm ? `${e1rm} kg` : '—'}</span>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             )
                           })
@@ -393,7 +610,7 @@ export default function GymPage() {
         </>
       )}
 
-      {/* ── PRs TAB ────────────────────────────────────────── */}
+      {/* ── PRs TAB ─────────────────────────────────────────────────────────── */}
       {tab === 'prs' && (
         <>
           {error && (
@@ -454,6 +671,11 @@ export default function GymPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Floating rest timer */}
+      {restSeconds > 0 && (
+        <RestTimerBar seconds={restSeconds} onAdjust={adjustRest} onStop={stopRest} />
       )}
     </div>
   )

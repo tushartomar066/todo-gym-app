@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { Task, Workout, Exercise, WorkoutSet, CardioLog, ActivityType } from '@/types/database'
+import { Task, Workout, Exercise, WorkoutSet, CardioLog, ActivityType, SetType } from '@/types/database'
 
 async function getUser() {
   const supabase = await createClient()
@@ -280,7 +280,12 @@ export async function addExercise(name: string) {
   return (data as Exercise) || null
 }
 
-export async function addSet(exerciseId: string, weight: number, reps: number) {
+export async function addSet(
+  exerciseId: string,
+  weight: number,
+  reps: number,
+  setType: SetType = 'working',
+) {
   const { user, supabase } = await getUser()
 
   const { data: exercise, error: exerciseError } = await supabase
@@ -303,13 +308,121 @@ export async function addSet(exerciseId: string, weight: number, reps: number) {
 
   const { data, error } = await supabase
     .from('sets')
-    .insert([{ exercise_id: exerciseId, weight, reps, is_completed: false }])
+    .insert([{ exercise_id: exerciseId, weight, reps, set_type: setType, is_completed: false }])
     .select()
     .single()
 
   if (error) throw error
   revalidatePath('/gym')
   return (data as WorkoutSet) || null
+}
+
+export async function updateExerciseNotes(exerciseId: string, notes: string | null) {
+  const { user, supabase } = await getUser()
+
+  const { data: exercise, error: exerciseError } = await supabase
+    .from('exercises')
+    .select('id, workout_id, workouts!inner(user_id)')
+    .eq('id', exerciseId)
+    .single()
+
+  if (exerciseError || !exercise) {
+    throw new Error('Exercise not found')
+  }
+
+  const workouts = exercise.workouts as unknown as { user_id: string } | { user_id: string }[]
+  const workoutUserId = Array.isArray(workouts)
+    ? workouts[0]?.user_id
+    : workouts?.user_id
+
+  if (!workoutUserId) throw new Error('Exercise not found')
+  if (workoutUserId !== user.id) throw new Error('Unauthorized')
+
+  const { error } = await supabase
+    .from('exercises')
+    .update({ notes: notes?.trim() || null })
+    .eq('id', exerciseId)
+
+  if (error) throw error
+  revalidatePath('/gym')
+}
+
+export async function getPreviousExerciseData(exerciseName: string): Promise<{
+  exerciseName: string
+  sets: { weight: number | null; reps: number | null; set_type: SetType }[]
+  date: string | null
+} | null> {
+  const { user, supabase } = await getUser()
+
+  // Find the most recent PAST workout that contains an exercise with this name.
+  // Today's workout (if any) is excluded so we surface the *previous* session.
+  const today = new Date().toISOString().split('T')[0]
+
+  const { data, error } = await supabase
+    .from('exercises')
+    .select(`
+      name,
+      notes,
+      workout_id,
+      workouts!inner (
+        date,
+        user_id
+      ),
+      sets (
+        weight,
+        reps,
+        set_type,
+        is_completed
+      )
+    `)
+    .eq('workouts.user_id', user.id)
+    .eq('name', exerciseName)
+    .neq('workouts.date', today)
+    .order('date', { foreignTable: 'workouts', ascending: false })
+    .limit(1)
+
+  if (error) throw error
+  if (!data || data.length === 0) return null
+
+  const latest = data[0] as any
+  const sets = (latest.sets as any[] | undefined)
+    ?.filter((s) => s.is_completed)
+    ?.map((s) => ({ weight: s.weight, reps: s.reps, set_type: s.set_type as SetType }))
+    ?? []
+
+  return {
+    exerciseName: latest.name,
+    sets,
+    date: latest.workouts?.date ?? null,
+  }
+}
+
+export async function getUniqueExerciseNames(): Promise<string[]> {
+  const { user, supabase } = await getUser()
+
+  const { data, error } = await supabase
+    .from('exercises')
+    .select(`
+      name,
+      workouts!inner ( user_id )
+    `)
+    .eq('workouts.user_id', user.id)
+    .order('name', { ascending: true })
+
+  if (error) throw error
+  if (!data) return []
+
+  // Deduplicate by name (Supabase returns one row per exercise row).
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const row of data as any[]) {
+    const name: string = row.name
+    if (name && !seen.has(name)) {
+      seen.add(name)
+      names.push(name)
+    }
+  }
+  return names
 }
 
 export async function toggleSetComplete(id: string) {

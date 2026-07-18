@@ -23,10 +23,13 @@ export interface Workout {
   exercises?: Exercise[]
 }
 
+export type SetType = 'warmup' | 'working' | 'drop_set' | 'failure'
+
 export interface Exercise {
   id: string
   workout_id: string
   name: string
+  notes: string | null
   created_at: string
   updated_at: string
   sets?: WorkoutSet[]
@@ -52,6 +55,7 @@ export interface WorkoutSet {
   weight: number | null
   reps: number | null
   is_completed: boolean
+  set_type: SetType
   created_at: string
   updated_at: string
 }
