@@ -425,6 +425,63 @@ export async function getUniqueExerciseNames(): Promise<string[]> {
   return names
 }
 
+// Batch version: fetches previous-session data for ALL exercise names in one query.
+// Eliminates N+1 pattern (was calling getPreviousExerciseData once per exercise).
+export async function getPreviousExerciseDataBatch(
+  exerciseNames: string[],
+): Promise<Map<string, { exerciseName: string; sets: { weight: number | null; reps: number | null; set_type: SetType }[]; date: string | null }>> {
+  const { user, supabase } = await getUser()
+  const today = new Date().toISOString().split('T')[0]
+
+  if (exerciseNames.length === 0) return new Map()
+
+  const { data, error } = await supabase
+    .from('exercises')
+    .select(`
+      name,
+      workout_id,
+      workouts!inner (
+        date,
+        user_id
+      ),
+      sets (
+        weight,
+        reps,
+        set_type,
+        is_completed
+      )
+    `)
+    .eq('workouts.user_id', user.id)
+    .in('name', exerciseNames)
+    .neq('workouts.date', today)
+    .order('date', { foreignTable: 'workouts', ascending: false })
+
+  if (error) throw error
+  if (!data) return new Map()
+
+  // Group by exercise name, keeping only the most recent workout per name.
+  const result = new Map<string, { exerciseName: string; sets: { weight: number | null; reps: number | null; set_type: SetType }[]; date: string | null }>()
+  const seenWorkoutPerName = new Set<string>()
+
+  for (const row of data as any[]) {
+    const name: string = row.name
+    if (result.has(name)) continue // already captured the latest workout for this name
+
+    const workout = row.workouts
+    if (!workout || seenWorkoutPerName.has(`${name}:${workout.date}`)) continue
+    seenWorkoutPerName.add(`${name}:${workout.date}`)
+
+    const sets = (row.sets as any[] | undefined)
+      ?.filter((s) => s.is_completed)
+      ?.map((s) => ({ weight: s.weight, reps: s.reps, set_type: s.set_type as SetType }))
+      ?? []
+
+    result.set(name, { exerciseName: name, sets, date: workout.date })
+  }
+
+  return result
+}
+
 export async function toggleSetComplete(id: string) {
   const { user, supabase } = await getUser()
 
@@ -493,6 +550,33 @@ export async function deleteSet(setId: string) {
     .from('sets')
     .delete()
     .eq('id', setId)
+
+  if (error) throw error
+  revalidatePath('/gym')
+}
+
+export async function deleteExercise(exerciseId: string) {
+  const { user, supabase } = await getUser()
+
+  const { data: exercise, error: setError } = await supabase
+    .from('exercises')
+    .select('id, workouts!inner(user_id)')
+    .eq('id', exerciseId)
+    .single()
+
+  if (setError || !exercise) {
+    throw new Error('Exercise not found')
+  }
+
+  const workouts = Array.isArray(exercise.workouts) ? exercise.workouts[0] : exercise.workouts
+  if (workouts.user_id !== user.id) {
+    throw new Error('Unauthorized')
+  }
+
+  const { error } = await supabase
+    .from('exercises')
+    .delete()
+    .eq('id', exerciseId)
 
   if (error) throw error
   revalidatePath('/gym')

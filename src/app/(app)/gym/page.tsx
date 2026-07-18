@@ -8,7 +8,8 @@ import {
   addSet,
   toggleSetComplete,
   deleteSet,
-  getPreviousExerciseData,
+  deleteExercise,
+  getPreviousExerciseDataBatch,
   getUniqueExerciseNames,
   updateExerciseNotes,
   type PersonalRecord,
@@ -124,6 +125,17 @@ export default function GymPage() {
 
       const names = await getUniqueExerciseNames()
       setExerciseNames(names)
+
+      // Batch fetch previous-session data for all exercise names (one query instead of N+1)
+      if (names.length > 0) {
+        const prevBatch = await getPreviousExerciseDataBatch(names)
+        const newPrevMap = new Map<string, PreviousSession>()
+        data.forEach(w => (w.exercises || []).forEach(ex => {
+          const prev = prevBatch.get(ex.name)
+          if (prev && prev.sets.length > 0) newPrevMap.set(ex.id, prev)
+        }))
+        setPrevMap(newPrevMap)
+      }
     } catch {
       setError('Failed to load workouts')
     } finally {
@@ -174,7 +186,8 @@ export default function GymPage() {
       })
 
       // Pull in the previous session for progressive-overload hints.
-      const prev = await getPreviousExerciseData(ex.name)
+      const prevBatch = await getPreviousExerciseDataBatch([ex.name])
+      const prev = prevBatch.get(ex.name)
       if (prev) setPrevMap(p => new Map(p).set(ex.id, prev))
 
       const names = await getUniqueExerciseNames()
@@ -262,6 +275,26 @@ export default function GymPage() {
         })
       } catch {
         setError('Failed to delete set')
+      }
+    })
+  }
+
+  const handleDeleteExercise = (exerciseId: string) => {
+    startTransition(async () => {
+      setError(null)
+      try {
+        await deleteExercise(exerciseId)
+        setWorkouts(prev => prev.map(w => ({
+          ...w,
+          exercises: (w.exercises || []).filter(ex => ex.id !== exerciseId)
+        })))
+        setSetsMap(prev => {
+          const map = new Map(prev)
+          map.delete(exerciseId)
+          return map
+        })
+      } catch {
+        setError('Failed to delete exercise')
       }
     })
   }
@@ -422,6 +455,18 @@ export default function GymPage() {
                                     </p>
                                   </div>
                                   <div className="flex items-center gap-2">
+                                    {isToday && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteExercise(exercise.id)}
+                                        disabled={isPending}
+                                        className="flex items-center gap-1 px-2.5 py-1.5 text-red-400/70 hover:text-red-400 bg-red-500/5 hover:bg-red-500/10 text-xs font-medium rounded-lg border border-red-500/10 hover:border-red-500/20 transition-colors"
+                                        title="Delete exercise and all its sets"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        Delete
+                                      </button>
+                                    )}
                                     {prev && prev.sets.length > 0 && (
                                       <button
                                         type="button"
