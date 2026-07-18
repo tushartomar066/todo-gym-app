@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+/* ── Base ─────────────────────────────────────────────── */
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ─────────────────────────────────────────────────────────
+   THEMES — override Tailwind v4's --color-* vars on <html>.
+   Every utility like bg-gray-900 resolves to var(--color-gray-900)
+   so changing these cascades app-wide automatically.
+───────────────────────────────────────────────────────── */
+
+/* ── Light ────────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-gray-950: #eef2ff;
+  --color-gray-900: #ffffff;
+  --color-gray-800: #e0e7ff;
+  --color-gray-700: #c7d2fe;
+  --color-gray-600: #818cf8;
+  --color-gray-500: #6b7280;
+  --color-gray-400: #374151;
+  --color-gray-300: #1f2937;
+  --color-gray-200: #111827;
+  --color-white:    #ffffff;
+  background-color: #eef2ff;
+  color: #0f172a;
+}
+
+/* ── Acid Tabs — Fuchsia (#D8125B) + Dark Grey (#2C2E39) */
+[data-theme="acid"] {
+  --color-gray-950: #1a1b22;
+  --color-gray-900: #2c2e39;
+  --color-gray-800: #3a3c4a;
+  --color-gray-700: #4a4c5c;
+  --color-gray-600: #6b6d80;
+  --color-gray-500: #8f91a8;
+  --color-gray-400: #b5b7cc;
+  --color-gray-300: #d5d7e8;
+  --color-gray-200: #ecedf5;
+  --color-white:    #f8f8fc;
+  /* Remap accent colors to fuchsia */
+  --color-indigo-600:  #D8125B;
+  --color-indigo-500:  #e8256e;
+  --color-indigo-400:  #f0508a;
+  --color-indigo-300:  #f57faa;
+  --color-emerald-600: #D8125B;
+  --color-emerald-500: #e8256e;
+  --color-emerald-400: #f0508a;
+  background-color: #1a1b22;
+  color: #f8f8fc;
+}
+
+/* ── Engineered Floors — Narvik (#EAE7DD) + Sorrell Brown (#99775C) */
+[data-theme="floors"] {
+  --color-gray-950: #f5f2ec;
+  --color-gray-900: #EAE7DD;
+  --color-gray-800: #ddd9cd;
+  --color-gray-700: #c8c2b2;
+  --color-gray-600: #a8906e;
+  --color-gray-500: #99775C;
+  --color-gray-400: #7a5c42;
+  --color-gray-300: #3d2e22;
+  --color-gray-200: #2a1f16;
+  --color-white:    #ffffff;
+  /* Remap accents to Sorrell brown */
+  --color-indigo-600:  #99775C;
+  --color-indigo-500:  #a88568;
+  --color-indigo-400:  #bb9878;
+  --color-indigo-300:  #cfb090;
+  --color-emerald-600: #99775C;
+  --color-emerald-500: #a88568;
+  --color-emerald-400: #bb9878;
+  background-color: #f5f2ec;
+  color: #1a120b;
+}
+
+/* ── Liberty London — Tyrian Purple (#4F0341) + White (#FFFFFF) */
+[data-theme="liberty"] {
+  --color-gray-950: #f9f5ff;
+  --color-gray-900: #ffffff;
+  --color-gray-800: #f0e8f8;
+  --color-gray-700: #ddc8ef;
+  --color-gray-600: #a06db8;
+  --color-gray-500: #7a4a94;
+  --color-gray-400: #4F0341;
+  --color-gray-300: #3a0230;
+  --color-gray-200: #280120;
+  /* Keep white as true white so text-white on buttons stays visible */
+  --color-white:    #ffffff;
+  /* Remap accent colors to Tyrian purple */
+  --color-indigo-600:  #4F0341;
+  --color-indigo-500:  #6a0558;
+  --color-indigo-400:  #8a0a72;
+  --color-indigo-300:  #a8208e;
+  --color-emerald-600: #4F0341;
+  --color-emerald-500: #6a0558;
+  --color-emerald-400: #8a0a72;
+  background-color: #f9f5ff;
+  color: #1a0016;
+}
