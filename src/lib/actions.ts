@@ -463,6 +463,41 @@ export async function toggleSetComplete(id: string) {
   return (data as WorkoutSet) || null
 }
 
+export async function deleteSet(setId: string) {
+  const { user, supabase } = await getUser()
+
+  const { data: set, error: setError } = await supabase
+    .from('sets')
+    .select('id, exercises!inner(workout_id, workouts!inner(user_id))')
+    .eq('id', setId)
+    .single()
+
+  if (setError || !set) {
+    throw new Error('Set not found')
+  }
+
+  const exercises = set.exercises as unknown as
+    | { workout_id: string; workouts: { user_id: string } | { user_id: string }[] }
+    | { workout_id: string; workouts: { user_id: string } | { user_id: string }[] }[]
+
+  const exerciseObj = Array.isArray(exercises) ? exercises[0] : exercises
+  const workouts = exerciseObj?.workouts
+  const workoutUserId = Array.isArray(workouts)
+    ? workouts[0]?.user_id
+    : workouts?.user_id
+
+  if (!workoutUserId) throw new Error('Set not found')
+  if (workoutUserId !== user.id) throw new Error('Unauthorized')
+
+  const { error } = await supabase
+    .from('sets')
+    .delete()
+    .eq('id', setId)
+
+  if (error) throw error
+  revalidatePath('/gym')
+}
+
 export async function completeWorkout(workoutId: string) {
   const { user, supabase } = await getUser()
 

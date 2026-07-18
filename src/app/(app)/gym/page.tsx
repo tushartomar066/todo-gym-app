@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useTransition } from 'react'
 import {
   getAllWorkoutsWithDetails,
   getPersonalRecords,
   addExercise,
   addSet,
   toggleSetComplete,
+  deleteSet,
   getPreviousExerciseData,
   getUniqueExerciseNames,
   updateExerciseNotes,
@@ -15,7 +16,7 @@ import {
 import { type Workout, type Exercise, type WorkoutSet, type SetType } from '@/types/database'
 import ExerciseCombobox from '@/components/gym/ExerciseCombobox'
 import RestTimerBar from '@/components/gym/RestTimerBar'
-import { Plus, Dumbbell, Check, X, Loader2, ChevronDown, ChevronUp, Calendar, Trophy } from 'lucide-react'
+import { Plus, Dumbbell, Check, X, Loader2, ChevronDown, ChevronUp, Calendar, Trophy, Trash2, StickyNote } from 'lucide-react'
 
 interface SetFormState {
   exerciseId: string
@@ -63,25 +64,6 @@ function formatDate(dateStr: string): string {
   })
 }
 
-// Total volume = weight × reps across completed WORKING sets.
-function calcVolume(sets: WorkoutSet[]): number {
-  return sets
-    .filter(s => s.is_completed && s.set_type === 'working')
-    .reduce((sum, s) => sum + (Number(s.weight) || 0) * (Number(s.reps) || 0), 0)
-}
-
-// Estimated 1RM (Epley) from the best completed WORKING set.
-function calcE1RM(sets: WorkoutSet[]): number | null {
-  let best = 0
-  for (const s of sets) {
-    if (s.is_completed && s.set_type === 'working' && s.weight && s.reps) {
-      const e1 = Number(s.weight) * (1 + Number(s.reps) / 30)
-      if (e1 > best) best = e1
-    }
-  }
-  return best > 0 ? Math.round(best * 10) / 10 : null
-}
-
 type Tab = 'log' | 'prs'
 
 export default function GymPage() {
@@ -103,6 +85,9 @@ export default function GymPage() {
   // Rest timer
   const [restSeconds, setRestSeconds] = useState(0)
   const restRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Delete-set transition
+  const [isPending, startTransition] = useTransition()
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -265,6 +250,22 @@ export default function GymPage() {
     }
   }
 
+  const handleDeleteSet = (exerciseId: string, setId: string) => {
+    startTransition(async () => {
+      setError(null)
+      try {
+        await deleteSet(setId)
+        setSetsMap(prev => {
+          const map = new Map(prev)
+          map.set(exerciseId, (map.get(exerciseId) || []).filter(s => s.id !== setId))
+          return map
+        })
+      } catch {
+        setError('Failed to delete set')
+      }
+    })
+  }
+
   // ── auto-fill today's empty sets from the previous session ───────────────────
   const autoFillFromPrevious = async (exerciseId: string) => {
     const prev = prevMap.get(exerciseId)
@@ -410,8 +411,6 @@ export default function GymPage() {
                             const sets = setsMap.get(exercise.id) || []
                             const doneCount = sets.filter(s => s.is_completed).length
                             const prev = prevMap.get(exercise.id)
-                            const volume = calcVolume(sets)
-                            const e1rm = calcE1RM(sets)
 
                             return (
                               <div key={exercise.id} className="pt-4 space-y-3">
@@ -462,13 +461,16 @@ export default function GymPage() {
 
                                 {/* Notes (today's exercises only) */}
                                 {isToday && (
-                                  <input
-                                    type="text"
-                                    defaultValue={exercise.notes ?? ''}
-                                    onBlur={e => handleNotesBlur(exercise.id, e.target.value)}
-                                    placeholder="Notes (e.g. seat at position 4)"
-                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-gray-300 placeholder-gray-600 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                                  />
+                                  <div className="mt-1 flex items-start gap-2 rounded-lg bg-gray-800/30 px-3 py-2">
+                                    <StickyNote className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-gray-600" />
+                                    <input
+                                      type="text"
+                                      defaultValue={exercise.notes ?? ''}
+                                      onBlur={e => handleNotesBlur(exercise.id, e.target.value)}
+                                      placeholder="Add a note — e.g. seat at position 4"
+                                      className="w-full bg-transparent text-sm text-gray-400 placeholder:text-gray-600 focus:text-gray-200 focus:outline-none"
+                                    />
+                                  </div>
                                 )}
 
                                 {/* Set form */}
@@ -563,7 +565,20 @@ export default function GymPage() {
                                         </span>
                                         <span className={set.is_completed ? 'line-through' : ''}>{set.weight} kg</span>
                                         <span className={set.is_completed ? 'line-through' : ''}>{set.reps} reps</span>
-                                        <div className="flex justify-end">
+                                        <div className="flex justify-end gap-1.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteSet(exercise.id, set.id)}
+                                            disabled={!isToday || isPending}
+                                            title="Delete set"
+                                            className={`h-5 w-5 flex items-center justify-center transition-colors ${
+                                              isToday
+                                                ? 'text-gray-500 hover:text-red-400'
+                                                : 'text-gray-700 opacity-40 cursor-default'
+                                            }`}
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </button>
                                           <button
                                             onClick={() => handleToggleSet(exercise.id, set.id, set.is_completed)}
                                             disabled={!isToday}
@@ -583,19 +598,7 @@ export default function GymPage() {
                                   </div>
                                 )}
 
-                                {/* Metrics: volume + estimated 1RM */}
-                                {(volume > 0 || e1rm) && (
-                                  <div className="flex flex-wrap gap-3 pt-1">
-                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800/60 border border-gray-800">
-                                      <span className="text-xs text-gray-500 uppercase tracking-wider">Volume</span>
-                                      <span className="text-sm font-semibold text-gray-200">{volume} kg</span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800/60 border border-gray-800">
-                                      <span className="text-xs text-gray-500 uppercase tracking-wider">Est. 1RM</span>
-                                      <span className="text-sm font-semibold text-emerald-400">{e1rm ? `${e1rm} kg` : '—'}</span>
-                                    </div>
-                                  </div>
-                                )}
+                                {/* Metrics removed — card ends cleanly after the last set */}
                               </div>
                             )
                           })
