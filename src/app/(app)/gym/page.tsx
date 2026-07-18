@@ -17,6 +17,7 @@ import {
 import { type Workout, type Exercise, type WorkoutSet, type SetType } from '@/types/database'
 import ExerciseCombobox from '@/components/gym/ExerciseCombobox'
 import RestTimerBar from '@/components/gym/RestTimerBar'
+import { getTodayIST, getYesterdayIST } from '@/lib/date'
 import { Plus, Dumbbell, Check, X, Loader2, ChevronDown, ChevronUp, Calendar, Trophy, Trash2, StickyNote } from 'lucide-react'
 
 interface SetFormState {
@@ -56,8 +57,8 @@ const SET_TYPE_ROW: Record<SetType, string> = Object.fromEntries(
 ) as Record<SetType, string>
 
 function formatDate(dateStr: string): string {
-  const today = new Date().toISOString().split('T')[0]
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+  const today = getTodayIST()
+  const yesterday = getYesterdayIST()
   if (dateStr === today) return 'Today'
   if (dateStr === yesterday) return 'Yesterday'
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
@@ -90,7 +91,7 @@ export default function GymPage() {
   // Delete-set transition
   const [isPending, startTransition] = useTransition()
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = getTodayIST()
 
   // ── rest timer countdown ───────────────────────────────────────────────────
   useEffect(() => {

@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getTodayIST } from '@/lib/date'
 import { Task, Workout, Exercise, WorkoutSet, CardioLog, ActivityType, SetType } from '@/types/database'
 
 async function getUser() {
@@ -15,7 +16,7 @@ async function getUser() {
 
 export async function getTodayTasks() {
   const { user, supabase } = await getUser()
-  const today = new Date().toISOString().split('T')[0]
+  const today = getTodayIST()
 
   const { data, error } = await supabase
     .from('tasks')
@@ -107,8 +108,8 @@ export async function getTasksForLast7Days() {
   const sevenDaysAgo = new Date(today)
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6)
 
-  const start = sevenDaysAgo.toISOString().split('T')[0]
-  const end = today.toISOString().split('T')[0]
+  const start = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(sevenDaysAgo)
+  const end = getTodayIST()
 
   const { data, error } = await supabase
     .from('tasks')
@@ -124,7 +125,7 @@ export async function getTasksForLast7Days() {
 
 export async function getTodayWorkout() {
   const { user, supabase } = await getUser()
-  const today = new Date().toISOString().split('T')[0]
+  const today = getTodayIST()
 
   const { data, error } = await supabase
     .from('workouts')
@@ -141,7 +142,7 @@ export async function getTodayWorkout() {
 
 export async function getTodayWorkoutWithDetails() {
   const { user, supabase } = await getUser()
-  const today = new Date().toISOString().split('T')[0]
+  const today = getTodayIST()
 
   const { data, error } = await supabase
     .from('workouts')
@@ -237,7 +238,7 @@ export async function getPersonalRecords(): Promise<PersonalRecord[]> {
 
 export async function startWorkout() {
   const { user, supabase } = await getUser()
-  const today = new Date().toISOString().split('T')[0]
+  const today = getTodayIST()
 
   const { data, error } = await supabase
     .from('workouts')
@@ -256,7 +257,7 @@ export async function startWorkout() {
 
 export async function addExercise(name: string) {
   const { user, supabase } = await getUser()
-  const today = new Date().toISOString().split('T')[0]
+  const today = getTodayIST()
 
   const { data: workout, error: workoutError } = await supabase
     .from('workouts')
@@ -356,7 +357,7 @@ export async function getPreviousExerciseData(exerciseName: string): Promise<{
 
   // Find the most recent PAST workout that contains an exercise with this name.
   // Today's workout (if any) is excluded so we surface the *previous* session.
-  const today = new Date().toISOString().split('T')[0]
+  const today = getTodayIST()
 
   const { data, error } = await supabase
     .from('exercises')
@@ -431,7 +432,7 @@ export async function getPreviousExerciseDataBatch(
   exerciseNames: string[],
 ): Promise<Map<string, { exerciseName: string; sets: { weight: number | null; reps: number | null; set_type: SetType }[]; date: string | null }>> {
   const { user, supabase } = await getUser()
-  const today = new Date().toISOString().split('T')[0]
+  const today = getTodayIST()
 
   if (exerciseNames.length === 0) return new Map()
 
@@ -603,7 +604,7 @@ export async function completeWorkout(workoutId: string) {
 
 export async function getDashboardData() {
   const { user, supabase } = await getUser()
-  const today = new Date().toISOString().split('T')[0]
+  const today = getTodayIST()
 
   const { data: tasks, error: tasksError } = await supabase
     .from('tasks')
@@ -627,7 +628,7 @@ export async function getDashboardData() {
 
   const sevenDaysAgo = new Date()
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6)
-  const weekStart = sevenDaysAgo.toISOString().split('T')[0]
+  const weekStart = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(sevenDaysAgo)
 
   const { data: weeklyTasks, error: weeklyError } = await supabase
     .from('tasks')
