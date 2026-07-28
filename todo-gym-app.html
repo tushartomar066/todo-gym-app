@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-Do & Gym Tracker</title>
+    <!-- Tailwind Configuration -->
+    <script>
+        window.tailwindConfig = {
+            darkMode: ['class'],
+            theme: {
+                extend: {
+                    colors: {
+                        indigo: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            200: '#c7d2fe',
+                            300: '#a5b4fc',
+                            400: '#818cf8',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            800: '#3730a3',
+                            900: '#312e81',
+                            950: '#1e1b4b'
+                        },
+                        emerald: {
+                            50: '#ecfdf5',
+                            100: '#d1fae5',
+                            200: '#a7f3d0',
+                            300: '#6ee7b7',
+                            400: '#34d399',
+                            500: '#10b981',
+                            600: '#059669',
+                            700: '#047857',
+                            800: '#065f46',
+                            900: '#064e3b',
+                            950: '#022c22'
+                        },
+                        slate: {
+                            50: '#f8fafc',
+                            100: '#f1f5f9',
+                            200: '#e2e8f0',
+                            300: '#cbd5e1',
+                            400: '#94a3b8',
+                            500: '#64748b',
+                            600: '#475569',
+                            700: '#334155',
+                            800: '#263238',
+                            900: '#1e293b',
+                            950: '#0f172a'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="dark bg-slate-900 text-slate-100">
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@lucide/react"></script>
+
+    <script type="text/javascript">
+        const { useState, useEffect, useContext, createElement: el, Fragment } = React;
+        const { useTransition } = React;
+
+        // Context
+        const AppContext = React.createContext();
+
+        // App Provider with localStorage persistence
+        function AppProvider({ children }) {
+            const [todos, setTodosState] = useState(() => {
+                const saved = localStorage.getItem('todos');
+                return saved ? JSON.parse(saved) : [];
+            });
+
+            const [workouts, setWorkoutsState] = useState(() => {
+                const saved = localStorage.getItem('workouts');
+                return saved ? JSON.parse(saved) : [];
+            });
+
+            // Save todos to localStorage when they change
+            useEffect(() => {
+                localStorage.setItem('todos', JSON.stringify(todos));
+            }, [todos]);
+
+            // Save workouts to localStorage when they change
+            useEffect(() => {
+                localStorage.setItem('workouts', JSON.stringify(workouts));
+            }, [workouts]);
+
+            return el(AppContext.Provider, {
+                value: {
+                    todos,
+                    setTodos: setTodosState,
+                    workouts,
+                    setWorkouts: setWorkoutsState
+                }
+            }, children);
+        }
+
+        // Custom hook to use app context
+        function useApp() {
+            return useContext(AppContext);
+        }
+
+        // Utility function to get today's date string (YYYY-MM-DD)
+        function getTodayDate() {
+            return new Date().toISOString().split('T')[0];
+        }
+
+        // Component: NavItem for bottom navigation
+        function NavItem({ icon, label, isActive, onClick }) {
+            return el('button', {
+                className: `flex flex-col items-center px-2 py-3 text-sm ${isActive ? 'text-indigo-400' : 'text-slate-400 hover:text-slate-300'}`,
+                onClick: onClick
+            },
+                el(icon, { className: `h-5 w-5` }),
+                el('span', { className: `mt-1` }, label)
+            );
+        }
+
+        // Component: PriorityBadge
+        function PriorityBadge({ priority }) {
+            const colors = {
+                low: 'bg-slate-600/20 text-slate-300',
+                medium: 'bg-indigo-600/20 text-indigo-300',
+                high: 'bg-emerald-600/20 text-emerald-300'
+            };
+            return el('span', { className: `px-2 py-1 text-xs rounded-full ${colors[priority] || colors.low}` }, priority.toUpperCase());
+        }
+
+        // Component: TodoItem
+        function TodoItem({ todo, onToggle, onEdit, onDelete }) {
+            const [isEditing, setIsEditing] = useState(false);
+            const [editText, setEditText] = useState(todo.title);
+            const [editDate, setEditDate] = useState(todo.dueDate || '');
+            const [editPriority, setEditPriority] = useState(todo.priority || 'medium');
+
+            const handleSave = () => {
+                onEdit({ ...todo, title: editText, dueDate: editDate || null, priority: editPriority });
+                setIsEditing(false);
+            };
+
+            return el('div', { className: `flex items-center gap-3 p-4 bg-slate-800/50 rounded-lg ${todo.completed ? 'line-through' : ''}` },
+                el('input', {
+                    type: 'checkbox',
+                    checked: todo.completed,
+                    onChange: () => onToggle(todo.id),
+                    className: 'h-4 w-4 text-indigo-600 rounded border-slate-600'
+                }),
+                !isEditing ? (
+                    el(Fragment, null,
+                        el('div', { className: 'flex-1 min-w-0' },
+                            el('h3', { className: 'font-medium truncate' }, todo.title),
+                            el('div', { className: 'flex items-center gap-2 mt-1 text-sm' },
+                                todo.dueDate && el('span', { className: 'text-slate-400' },
+                                    el(Calendar, { className: 'h-4 w-4' }), ' ', new Date(todo.dueDate).toLocaleDateString()
+                                ),
+                                el(PriorityBadge, { priority: todo.priority })
+                            )
+                        ),
+                        el('div', { className: 'flex items-center gap-2' },
+                            el(Edit, {
+                                onClick: () => setIsEditing(true),
+                                className: 'h-5 w-5 text-indigo-400 hover:text-indigo-300'
+                            }),
+                            el(Trash2, {
+                                onClick: () => onDelete(todo.id),
+                                className: 'h-5 w-5 text-slate-500 hover:text-slate-400'
+                            })
+                        )
+                    )
+                ) : (
+                    el('div', { className: 'flex-1 space-y-2' },
+                        el('input', {
+                            value: editText,
+                            onChange: (e) => setEditText(e.target.value),
+                            className: 'border border-slate-700 rounded px-3 py-2 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                            placeholder: 'Edit task title...'
+                        }),
+                        el('div', { className: 'flex gap-3' },
+                            el('input', {
+                                type: 'date',
+                                value: editDate,
+                                onChange: (e) => setEditDate(e.target.value),
+                                className: 'border border-slate-700 rounded px-3 py-2 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500'
+                            }),
+                            el('select', {
+                                value: editPriority,
+                                onChange: (e) => setEditPriority(e.target.value),
+                                className: 'border border-slate-700 rounded px-3 py-2 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500'
+                            },
+                                el('option', { value: 'low' }, 'Low'),
+                                el('option', { value: 'medium' }, 'Medium'),
+                                el('option', { value: 'high' }, 'High')
+                            ),
+                            el('button', {
+                                onClick: handleSave,
+                                className: 'px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700'
+                            }, 'Save'),
+                            el('button', {
+                                onClick: () => setIsEditing(false),
+                                className: 'px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-500'
+                            }, 'Cancel')
+                        )
+                    )
+                )
+            );
+        }
+
+        // Component: ToDo Form
+        function TodoForm({ onAdd }) {
+            const [title, setTitle] = useState('');
+            const [dueDate, setDueDate] = useState('');
+            const [priority, setPriority] = useState('medium');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (title.trim()) {
+                    onAdd({
+                        id: Date.now().toString(),
+                        title: title.trim(),
+                        dueDate: dueDate || null,
+                        priority,
+                        completed: false
+                    });
+                    setTitle('');
+                    setDueDate('');
+                    setPriority('medium');
+                }
+            };
+
+            return el('form', { onSubmit: handleSubmit, className: 'flex gap-3' },
+                el('input', {
+                    type: 'text',
+                    value: title,
+                    onChange: (e) => setTitle(e.target.value),
+                    className: 'flex-1 border border-slate-700 rounded px-4 py-3 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                    placeholder: 'What needs to be done?'
+                }),
+                el('div', { className: 'flex gap-2' },
+                    el('input', {
+                        type: 'date',
+                        value: dueDate,
+                        onChange: (e) => setDueDate(e.target.value),
+                        className: 'border border-slate-700 rounded px-3 py-2 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500'
+                    }),
+                    el('select', {
+                        value: priority,
+                        onChange: (e) => setPriority(e.target.value),
+                        className: 'border border-slate-700 rounded px-3 py-2 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500'
+                    },
+                        el('option', { value: 'low' }, 'Low'),
+                        el('option', { value: 'medium' }, 'Medium'),
+                        el('option', { value: 'high' }, 'High')
+                    )
+                ),
+                el('button', {
+                    type: 'submit',
+                    className: 'px-4 py-3 bg-indigo-600 text-white rounded hover:bg-indigo-700'
+                }, 'Add Task')
+            );
+        }
+
+        // Component: ToDo Filters
+        function TodoFilters({ activeFilter, setActiveFilter, activeSort, setActiveSort }) {
+            return el('div', { className: 'flex flex-wrap gap-2 mb-4' },
+                // Filter Tabs
+                el('div', null,
+                    el('h3', { className: 'text-sm font-medium mb-1 text-slate-400' }, 'Filter:'),
+                    el('div', { className: 'flex gap-1' },
+                        ['all', 'active', 'completed'].map(filter =>
+                            el('button', {
+                                key: filter,
+                                onClick: () => setActiveFilter(filter),
+                                className: `px-3 py-1 text-xs rounded ${activeFilter === filter ? 'bg-indigo-600 text-white' : 'bg-slate-800/50 text-slate-300 hover:bg-slate-700'}`
+                            }, filter.charAt(0).toUpperCase() + filter.slice(1))
+                        )
+                    )
+                ),
+                // Sort Tabs
+                el('div', { className: 'ml-4' },
+                    el('h3', { className: 'text-sm font-medium mb-1 text-slate-400' }, 'Sort:'),
+                    el('div', { className: 'flex gap-1' },
+                        ['priority', 'date'].map(sort =>
+                            el('button', {
+                                key: sort,
+                                onClick: () => setActiveSort(sort),
+                                className: `px-3 py-1 text-xs rounded ${activeSort === sort ? 'bg-indigo-600 text-white' : 'bg-slate-800/50 text-slate-300 hover:bg-slate-700'}`
+                            }, sort.charAt(0).toUpperCase() + sort.slice(1))
+                        )
+                    )
+                )
+            );
+        }
+
+        // Component: ToDoList
+        function ToDoList({ todos, activeFilter, activeSort, onToggle, onEdit, onDelete }) {
+            // Filter todos
+            const filteredTodos = todos.filter(todo => {
+                if (activeFilter === 'active') return !todo.completed;
+                if (activeFilter === 'completed') return todo.completed;
+                return true;
+            });
+
+            // Sort todos
+            const sortedTodos = [...filteredTodos].sort((a, b) => {
+                if (activeSort === 'priority') {
+                    const priorityOrder = { high: 3, medium: 2, low: 1 };
+                    return priorityOrder[b.priority] - priorityOrder[a.priority];
+                } else { // date
+                    const dateA = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+                    const dateB = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+                    return dateA - dateB;
+                }
+            });
+
+            return el('div', { className: 'space-y-3' },
+                sortedTodos.length === 0 ? (
+                    el('p', { className: 'text-center py-8 text-slate-500' },
+                        activeFilter === 'completed' ? 'No completed tasks yet' : 'No tasks yet'
+                    )
+                ) : (
+                    sortedTodos.map(todo =>
+                        el(TodoItem, {
+                            key: todo.id,
+                            todo,
+                            onToggle,
+                            onEdit,
+                            onDelete
+                        })
+                    )
+                )
+            );
+        }
+
+        // Component: ToDo View
+        function ToDoView() {
+            const { todos, setTodos } = useApp();
+            const [activeFilter, setActiveFilter] = useState('all');
+            const [activeSort, setActiveSort] = useState('priority');
+
+            const handleAddTodo = (todo) => {
+                setTodos([...todos, todo]);
+            };
+
+            const handleToggleTodo = (id) => {
+                setTodos(todos.map(todo =>
+                    todo.id === id ? { ...todo, completed: !todo.completed } : todo
+                ));
+            };
+
+            const handleEditTodo = (updatedTodo) => {
+                setTodos(todos.map(todo =>
+                    todo.id === updatedTodo.id ? updatedTodo : todo
+                ));
+            };
+
+            const handleDeleteTodo = (id) => {
+                setTodos(todos.filter(todo => todo.id !== id));
+            };
+
+            return el('div', { className: 'p-6' },
+                el('h1', { className: 'text-2xl font-bold mb-6 text-indigo-300' }, 'To-Do List'),
+                el(TodoForm, { onAdd: handleAddTodo }),
+                el(TodoFilters, {
+                    activeFilter,
+                    setActiveFilter,
+                    activeSort,
+                    setActiveSort
+                }),
+                el(ToDoList, {
+                    todos,
+                    activeFilter,
+                    activeSort,
+                    onToggle: handleToggleTodo,
+                    onEdit: handleEditTodo,
+                    onDelete: handleDeleteTodo
+                })
+            );
+        }
+
+        // Component: Workout Set Item
+        function WorkoutSetItem({ exerciseId, setIndex, set, onUpdateSet, onRemoveSet }) {
+            const [weight, setWeight] = useState(set.weight || '');
+            const [reps, setReps] = useState(set.reps || '');
+
+            const handleUpdate = () => {
+                onUpdateSet(exerciseId, setIndex, { weight: parseFloat(weight) || 0, reps: parseInt(reps) || 0 });
+            };
+
+            return el('div', { className: 'flex items-center gap-3 p-3 bg-slate-800/50 rounded' },
+                el('span', { className: 'w-10 text-center text-sm' }, `Set ${setIndex + 1}`),
+                el('input', {
+                    type: 'number',
+                    value: weight,
+                    onChange: (e) => setWeight(e.target.value),
+                    className: 'flex-1 border border-slate-700 rounded px-3 py-2 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                    placeholder: 'Weight (lbs/kg)'
+                }),
+                el('input', {
+                    type: 'number',
+                    value: reps,
+                    onChange: (e) => setReps(e.target.value),
+                    className: 'flex-1 border border-slate-700 rounded px-3 py-2 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                    placeholder: 'Reps'
+                }),
+                el('button', {
+                    onClick: handleUpdate,
+                    className: 'px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700'
+                }, 'Update'),
+                el('button', {
+                    onClick: () => onRemoveSet(exerciseId, setIndex),
+                    className: 'px-3 py-2 bg-slate-600 text-white rounded hover:bg-slate-500'
+                }, 'Remove')
+            );
+        }
+
+        // Component: Exercise Item
+        function ExerciseItem({ exercise, onUpdateExercise, onRemoveExercise, onAddSet }) {
+            const [exerciseName, setExerciseName] = useState(exercise.name || '');
+
+            const handleUpdateName = () => {
+                onUpdateExercise(exercise.id, { name: exerciseName });
+            };
+
+            return el('div', { className: 'mb-5 p-4 bg-slate-800/50 rounded' },
+                el('div', { className: 'flex justify-between items-start mb-3' },
+                    el('div', { className: 'flex-1' },
+                        el('input', {
+                            type: 'text',
+                            value: exerciseName,
+                            onChange: (e) => setExerciseName(e.target.value),
+                            className: 'border border-slate-700 rounded px-3 py-2 w-full bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                            placeholder: 'Exercise name'
+                        }),
+                        el('button', {
+                            onClick: handleUpdateName,
+                            className: 'mt-2 px-3 py-1 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-700'
+                        }, 'Update Name')
+                    ),
+                    el('button', {
+                        onClick: () => onRemoveExercise(exercise.id),
+                        className: 'h-8 w-8 flex items-center justify-center bg-slate-600/50 text-slate-400 hover:bg-slate-500 rounded'
+                    },
+                        el(X, { className: 'h-4 w-4' })
+                    )
+                ),
+                el('div', { className: 'space-y-2' },
+                    exercise.sets.map((set, index) =>
+                        el(WorkoutSetItem, {
+                            key: index,
+                            exerciseId: exercise.id,
+                            setIndex: index,
+                            set,
+                            onUpdateSet: onUpdateSet,
+                            onRemoveSet: onRemoveSet
+                        })
+                    )
+                ),
+                el('button', {
+                    onClick: () => onAddSet(exercise.id),
+                    className: 'w-full px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center justify-center gap-2'
+                },
+                    el(Plus, { className: 'h-4 w-4' }),
+                    'Add Set'
+                )
+            );
+        }
+
+        // Component: Gym Form (New Workout)
+        function GymForm({ onAddExercise }) {
+            const [exerciseName, setExerciseName] = useState('');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (exerciseName.trim()) {
+                    onAddExercise({
+                        id: Date.now().toString(),
+                        name: exerciseName.trim(),
+                        sets: [{ weight: 0, reps: 0 }] // Start with one empty set
+                    });
+                    setExerciseName('');
+                }
+            };
+
+            return el('form', { onSubmit: handleSubmit, className: 'flex gap-3' },
+                el('input', {
+                    type: 'text',
+                    value: exerciseName,
+                    onChange: (e) => setExerciseName(e.target.value),
+                    className: 'flex-1 border border-slate-700 rounded px-4 py-3 bg-slate-900 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                    placeholder: 'Exercise name (e.g., Bench Press)'
+                }),
+                el('button', {
+                    type: 'submit',
+                    className: 'px-4 py-3 bg-indigo-600 text-white rounded hover:bg-indigo-700'
+                }, 'Add Exercise')
+            );
+        }
+
+        // Component: Workout History Item
+        function WorkoutHistoryItem({ workout }) {
+            const formattedDate = new Date(workout.date).toLocaleDateString(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+
+            return el('div', { className: 'p-4 bg-slate-800/50 rounded mb-3' },
+                el('div', { className: 'flex justify-between items-start mb-2' },
+                    el('h3', { className: 'font-medium' }, formattedDate),
+                    el('span', { className: `px-2 py-1 text-xs rounded-full bg-slate-600/20 text-slate-300` },
+                        `${workout.exercises.length} exercises`
+                    )
+                ),
+                el('div', { className: 'space-y-2' },
+                    workout.exercises.map((exercise, index) =>
+                        el('div', { key: index, className: 'flex items-center gap-3' },
+                            el('div', { className: 'flex-1' },
+                                el('h4', { className: 'font-medium' }, exercise.name),
+                                el('div', { className: 'flex flex-wrap gap-2 mt-1' },
+                                    exercise.sets.map((set, setIndex) =>
+                                        el('span', {
+                                            key: setIndex,
+                                            className: 'px-3 py-1 text-xs rounded-full bg-slate-600/20 text-slate-300'
+                                        }, `${set.weight} × ${set.reps}`)
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            );
+        }
+
+        // Component: Gym View
+        function GymView() {
+            const { workouts, setWorkouts } = useApp();
+            const [isLogging, setIsLogging] = useState(false);
+            const [currentWorkout, setCurrentWorkout] = useState(null);
+            useState({
+                date: getTodayDate(),
+                exercises: []
+            });
+            const [historyTab, setHistoryTab] = useState('all'); // all, completed, today
+
+            // Filter workouts for history tab
+            const filteredWorkouts = workouts.filter(w => {
+                if (historyTab === 'today') {
+                    return w.date === getTodayDate();
+                }
+                return true; // 'all' shows everything
+            });
+
+            const handleAddExercise = (exercise) => {
+                setCurrentWorkout(prev => ({
+                    ...prev,
+                    exercises: [...prev.exercises, exercise]
+                }));
+            };
+
+            const handleUpdateExercise = (exerciseId, updates) => {
+                setCurrentWorkout(prev => ({
+                    ...prev,
+                    exercises: prev.exercises.map(ex =>
+                        ex.id === exerciseId ? { ...ex, ...updates } : ex
+                    )
+                }));
+            };
+
+            const handleRemoveExercise = (exerciseId) => {
+                setCurrentWorkout(prev => ({
+                    ...prev,
+                    exercises: prev.exercises.filter(ex => ex.id !== exerciseId)
+                }));
+            };
+
+            const handleUpdateSet = (exerciseId, setIndex, setData) => {
+                setCurrentWorkout(prev => ({
+                    ...prev,
+                    exercises: prev.exercises.map(ex =>
+                        ex.id === exerciseId ? {
+                            ...ex,
+                            sets: ex.sets.map((set, idx) =>
+                                idx === setIndex ? { ...set, ...setData } : set
+                            )
+                        } : ex
+                    )
+                }));
+            };
+
+            const handleRemoveSet = (exerciseId, setIndex) => {
+                setCurrentWorkout(prev => ({
+                    ...prev,
+                    exercises: prev.exercises.map(ex =>
+                        ex.id === exerciseId ? {
+                            ...ex,
+                            sets: ex.sets.filter((_, idx) => idx !== setIndex)
+                        } : ex
+                    )
+                }));
+            };
+
+            const handleStartNewWorkout = () => {
+                setIsLogging(true);
+                setCurrentWorkout({
+                    date: getTodayDate(),
+                    exercises: []
+                });
+            };
+
+            const handleFinishWorkout = () => {
+                if (currentWorkout.exercises.length > 0) {
+                    setWorkouts([...workouts, { ...currentWorkout, id: Date.now().toString() }]);
+                    setIsLogging(false);
+                    setCurrentWorkout({ date: getTodayDate(), exercises: [] });
+                }
+            };
+
+            return el('div', { className: 'p-6' },
+                el('h1', { className: 'text-2xl font-bold mb-6 text-indigo-300' }, 'Gym Workout Tracker'),
+                !isLogging ? (
+                    el('button', {
+                        onClick: handleStartNewWorkout,
+                        className: 'w-full px-6 py-3 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center justify-center gap-3'
+                    },
+                        el(Plus, { className: 'h-5 w-5' }),
+                        'Start New Workout'
+                    )
+                ) : (
+                    el(Fragment, null,
+                        el('div', { className: 'mb-6' },
+                            el('h2', { className: 'text-xl font-semibold mb-3' }, 'Logging Workout for Today'),
+                            el(GymForm, { onAddExercise: handleAddExercise }),
+                            el('div', { className: 'space-y-4' },
+                                currentWorkout.exercises.map((exercise, index) =>
+                                    el(ExerciseItem, {
+                                        key: index,
+                                        exercise,
+                                        onUpdateExercise: handleUpdateExercise,
+                                        onRemoveExercise: handleRemoveExercise,
+                                        onAddSet: () => {
+                                            setCurrentWorkout(prev => ({
+                                                ...prev,
+                                                exercises: prev.exercises.map(ex =>
+                                                    ex.id === exercise.id ?
+                                                        { ...ex, sets: [...ex.sets, { weight: 0, reps: 0 }] } :
+                                                    ex
+                                                )
+                                            });
+                                        }
+                                    })
+                                )
+                            ),
+                            el('div', { className: 'flex justify-between items-center pt-4 border-t border-slate-700' },
+                                el('button', {
+                                    onClick: handleFinishWorkout,
+                                    className: 'px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700'
+                                }, 'Finish Workout'),
+                                el('button', {
+                                    onClick: () => setIsLogging(false),
+                                    className: 'px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-500'
+                                }, 'Cancel')
+                            )
+                        )
+                    )
+                ),
+                el('div', { className: 'mt-10' },
+                    el('h2', { className: 'text-xl font-semibold mb-4' }, 'Workout History'),
+                    el('div', { className: 'flex gap-3 mb-4' },
+                        ['all', 'today'].map(tab =>
+                            el('button', {
+                                key: tab,
+                                onClick: () => setHistoryTab(tab),
+                                className: `px-3 py-1 text-xs rounded ${historyTab === tab ? 'bg-indigo-600 text-white' : 'bg-slate-800/50 text-slate-300 hover:bg-slate-700'}`
+                            },
+                                tab === 'all' ? 'All' : 'Today'
+                            )
+                        )
+                    ),
+                    el('div', { className: 'space-y-3' },
+                        filteredWorkouts.length === 0 ? (
+                            el('p', { className: 'text-center py-8 text-slate-500' },
+                                historyTab === 'today' ? 'No workouts logged for today yet' : 'No workout history yet'
+                            )
+                        ) : (
+                            filteredWorkouts.map(workout =>
+                                el(WorkoutHistoryItem, { key: workout.id, workout })
+                            )
+                        )
+                    )
+                )
+            );
+        }
+
+        // Component: Dashboard View
+        function DashboardView() {
+            const { todos, workouts } = useApp();
+            const today = getTodayDate();
+
+            // Calculate stats
+            const pendingHighPriority = todos.filter(t => !t.completed && t.priority === 'high').length;
+            const totalTodos = todos.length;
+            const completedTodos = todos.filter(t => t.completed).length;
+            const completionRate = totalTodos > 0 ? Math.round((completedTodos / totalTodos) * 100) : 0;
+
+            // Check if workout logged today
+            const todaysWorkout = workouts.find(w => w.date === today);
+            const workoutCompleted = todaysWorkout ? true : false;
+
+            // Motivational quotes
+            const quotes = [
+                "The only way to do great work is to love what you do.",
+                "Success is not final, failure is not fatal: it is the courage to continue that counts.",
+                "Don't watch the clock; do what it does. Keep going.",
+                "The future depends on what you do today.",
+                "You don't have to be great to start, but you have to start to be great."
+            ];
+            const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+
+            return el('div', { className: 'p-6' },
+                el('h1', { className: 'text-2xl font-bold mb-6 text-indigo-300' }, 'Dashboard'),
+                el('div', { className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8' },
+                    // Pending High Priority Tasks
+                    el('div', { className: 'bg-slate-800/50 p-4 rounded-lg' },
+                        el('h3', { className: 'text-sm font-medium mb-2 text-slate-400' }, 'High Priority Tasks'),
+                        el('p', { className: 'text-2xl font-bold text-indigo-300' }, pendingHighPriority),
+                        el('p', { className: 'text-xs text-slate-400 mt-1' }, 'pending today')
+                    ),
+                    // Workout Status
+                    el('div', { className: 'bg-slate-800/50 p-4 rounded-lg' },
+                        el('h3', { className: 'text-sm font-medium mb-2 text-slate-400' }, "Today's Workout"),
+                        el('div', { className: 'flex items-center gap-3' },
+                            el(CheckCircle, {
+                                className: `h-5 w-5 ${workoutCompleted ? 'text-emerald-400' : 'text-slate-500'}`
+                            }),
+                            el('div', null,
+                                el('p', { className: 'font-medium' }, workoutCompleted ? 'Completed' : 'Not Done'),
+                                el('p', { className: 'text-xs text-slate-400' }, 'Workout logged')
+                            )
+                        )
+                    ),
+                    // Progress Ring (Simple)
+                    el('div', { className: 'bg-slate-800/50 p-4 rounded-lg flex flex-col items-center' },
+                        el('h3', { className: 'text-sm font-medium mb-2 text-slate-400' }, 'Task Completion'),
+                        el('div', { className: 'relative w-16 h-16' },
+                            el('svg', { className: 'absolute inset-0', viewBox: '0 0 36 36' },
+                                el('circle', {
+                                    className: 'stroke-slate-700 stroke-2',
+                                    cx: '18', cy: '18', r: '16', fill: 'none'
+                                }),
+                                el('circle', {
+                                    className: `transition-all duration-500 ease-out stroke-indigo-400 stroke-2`,
+                                    cx: '18', cy: '18', r: '16', fill: 'none',
+                                    strokeDasharray: `${completionRate * 0.10053}, 100.53`
+                                })
+                            ),
+                            el('div', { className: 'absolute inset-0 flex items-center justify-center' },
+                                el('p', { className: 'text-xl font-bold text-indigo-300' }, `${completionRate}%`)
+                            )
+                        )
+                    )
+                ),
+                el('div', { className: 'bg-slate-800/50 p-6 rounded-lg' },
+                    el('h3', { className: 'text-lg font-semibold mb-4' }, 'Daily Motivation'),
+                    el('p', { className: 'text-slate-300 italic' }, `"${randomQuote}"`)
+                )
+            );
+        }
+
+        // Component: Main App
+        function App() {
+            const [currentView, setCurrentView] = useState('dashboard');
+
+            // Check for dark mode preference on load
+            useEffect(() => {
+                const savedTheme = localStorage.getItem('theme');
+                if (savedTheme) {
+                    document.documentElement.classList.toggle('dark', savedTheme === 'dark');
+                } else {
+                    // Default to dark mode
+                    document.documentElement.classList.add('dark');
+                }
+            }, []);
+
+            return el('div', { className: 'min-h-screen bg-slate-900 text-slate-100 transition-colors duration-200' },
+                el(AppContext.Provider, {
+                    value: {
+                        todos: [],
+                        setTodos: () => {},
+                        workouts: [],
+                        setWorkouts: () => {}
+                    }
+                },
+                    el('div', { className: 'flex flex-col h-screen' },
+                        // Main Content
+                        el('main', { className: 'flex-1 overflow-y-auto p-4' },
+                            currentView === 'dashboard' && el(DashboardView),
+                            currentView === 'todo' && el(ToDoView),
+                            currentView === 'gym' && el(GymView)
+                        ),
+                        // Bottom Navigation (Mobile) / Sidebar (Desktop)
+                        el('div', { className: 'hidden md:flex flex-shrink-0 border-t border-slate-800 bg-slate-900/50 backdrop-blur-sm' },
+                            el('div', { className: 'flex-1 flex space-x-4 p-4' },
+                                el(NavItem, {
+                                    icon: Home,
+                                    label: "Dashboard",
+                                    isActive: currentView === 'dashboard',
+                                    onClick: () => setCurrentView('dashboard')
+                                }),
+                                el(NavItem, {
+                                    icon: ListTodo,
+                                    label: "To-Do",
+                                    isActive: currentView === 'todo',
+                                    onClick: () => setCurrentView('todo')
+                                }),
+                                el(NavItem, {
+                                    icon: Dumbbell,
+                                    label: "Gym",
+                                    isActive: currentView === 'gym',
+                                    onClick: () => setCurrentView('gym')
+                                })
+                            )
+                        ),
+                        // Bottom Navigation for Mobile
+                        el('div', { className: 'md:hidden flex items-center justify-between border-t border-slate-800 bg-slate-900/50 backdrop-blur-sm p-3' },
+                            el(NavItem, {
+                                icon: Home,
+                                label: "Dash",
+                                isActive: currentView === 'dashboard',
+                                onClick: () => setCurrentView('dashboard')
+                            }),
+                            el(NavItem, {
+                                icon: ListTodo,
+                                label: "Todo",
+                                isActive: currentView === 'todo',
+                                onClick: () => setCurrentView('todo')
+                            }),
+                            el(NavItem, {
+                                icon: Dumbbell,
+                                label: "Gym",
+                                isActive: currentView === 'gym',
+                                onClick: () => setCurrentView('gym')
+                            })
+                        )
+                    )
+                )
+            );
+        }
+
+        // Render the app
+        const root = document.getElementById('root');
+        ReactDOM.render(el(AppProvider, null, el(App)), root);
+    </script>
+</body>
+</html>
