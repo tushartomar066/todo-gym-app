@@ -630,6 +630,87 @@ export async function deleteExercise(exerciseId: string) {
   revalidatePath('/gym')
 }
 
+// Add an exercise to any date's workout (creates workout for that date if missing)
+export async function addExerciseToDate(name: string, date: string) {
+  const { user, supabase } = await getUser()
+
+  const { data: workout, error: workoutError } = await supabase
+    .from('workouts')
+    .upsert(
+      { user_id: user.id, date },
+      { onConflict: 'user_id,date', ignoreDuplicates: false }
+    )
+    .select()
+    .single()
+
+  if (workoutError || !workout) throw new Error('Could not create workout')
+
+  const { data, error } = await supabase
+    .from('exercises')
+    .insert([{ workout_id: workout.id, name }])
+    .select()
+    .single()
+
+  if (error) throw error
+  revalidatePath('/gym')
+  return data as Exercise
+}
+
+// Mark every set in a workout as completed in one query
+export async function markAllSetsComplete(workoutId: string) {
+  const { user, supabase } = await getUser()
+
+  // Verify ownership
+  const { data: workout, error: woErr } = await supabase
+    .from('workouts')
+    .select('id, user_id')
+    .eq('id', workoutId)
+    .single()
+
+  if (woErr || !workout) throw new Error('Workout not found')
+  if ((workout as any).user_id !== user.id) throw new Error('Unauthorized')
+
+  // Fetch all exercise IDs for this workout
+  const { data: exercises, error: exErr } = await supabase
+    .from('exercises')
+    .select('id')
+    .eq('workout_id', workoutId)
+
+  if (exErr) throw exErr
+  const exIds = (exercises as { id: string }[]).map(e => e.id)
+  if (exIds.length === 0) return
+
+  const { error } = await supabase
+    .from('sets')
+    .update({ is_completed: true })
+    .in('exercise_id', exIds)
+
+  if (error) throw error
+  revalidatePath('/gym')
+}
+
+// Delete an entire workout — cascades to exercises and sets via DB FK
+export async function deleteWorkout(workoutId: string) {
+  const { user, supabase } = await getUser()
+
+  const { data: workout, error: woErr } = await supabase
+    .from('workouts')
+    .select('id, user_id')
+    .eq('id', workoutId)
+    .single()
+
+  if (woErr || !workout) throw new Error('Workout not found')
+  if ((workout as any).user_id !== user.id) throw new Error('Unauthorized')
+
+  const { error } = await supabase
+    .from('workouts')
+    .delete()
+    .eq('id', workoutId)
+
+  if (error) throw error
+  revalidatePath('/gym')
+}
+
 export async function getDashboardData() {
   const { user, supabase } = await getUser()
   const today = getTodayIST()
