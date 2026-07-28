@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useTransition, useMemo } from 'react'
 import {
   getPersonalRecords, addExercise, addExerciseToDate, addSet, toggleSetComplete,
-  deleteSet, deleteExercise, deleteWorkout, markAllSetsComplete,
+  deleteSet, deleteExercise, deleteWorkout,
   getPreviousExerciseDataBatch, updateExerciseNotes,
   getInitialGymData, type PersonalRecord,
 } from '@/lib/actions'
@@ -230,7 +230,6 @@ export default function GymClient({ initialWorkouts, initialExerciseNames, initi
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null)
   const [pastExName, setPastExName]             = useState('')
   const [addingPastEx, setAddingPastEx]         = useState(false)
-  const [markingComplete, setMarkingComplete]   = useState<string | null>(null)
   const [deletingWorkoutId, setDeletingWorkoutId] = useState<string | null>(null)
 
   // ── derived ────────────────────────────────────────────────────────────────
@@ -379,25 +378,6 @@ export default function GymClient({ initialWorkouts, initialExerciseNames, initi
     finally { setAddingPastEx(false) }
   }
 
-  // ── mark all sets complete ─────────────────────────────────────────────────
-  const handleMarkComplete = async (workoutId: string) => {
-    setMarkingComplete(workoutId)
-    try {
-      await markAllSetsComplete(workoutId)
-      // Optimistic: flip all sets in setsMap
-      const workout = workouts.find(w => w.id === workoutId)
-      if (workout) {
-        setSetsMap(prev => {
-          const map = new Map(prev)
-          for (const ex of workout.exercises || []) {
-            map.set(ex.id, (map.get(ex.id) || []).map(s => ({ ...s, is_completed: true })))
-          }
-          return map
-        })
-      }
-    } catch { setError('Failed to mark complete'); refresh() }
-    finally { setMarkingComplete(null) }
-  }
 
   // ── delete whole workout ───────────────────────────────────────────────────
   const handleDeleteWorkout = async (workoutId: string) => {
@@ -736,21 +716,6 @@ export default function GymClient({ initialWorkouts, initialExerciseNames, initi
                               <Edit2 className="h-3 w-3" />Editing past workout
                             </span>
                             <div className="flex items-center gap-2 ml-auto flex-wrap">
-                              {/* Mark all complete */}
-                              {sessTotal > 0 && sessDone < sessTotal && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleMarkComplete(workout.id)}
-                                  disabled={!!markingComplete}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-lg border border-emerald-500/20 transition-colors disabled:opacity-50"
-                                >
-                                  {markingComplete === workout.id
-                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    : <CheckCheck className="h-3.5 w-3.5" />
-                                  }
-                                  Mark all done
-                                </button>
-                              )}
                               {/* Delete whole workout */}
                               <button
                                 type="button"
