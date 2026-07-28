@@ -15,6 +15,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <head>
         <link rel="manifest" href="/manifest.json" />
+        {/* Synchronously apply saved theme before first paint to avoid flash */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('fittrack-theme');if(t&&t!=='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}`,
+          }}
+        />
       </head>
       <body className={`${inter.className} bg-gray-950 text-white antialiased`}>
         <ThemeProvider>

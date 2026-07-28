@@ -53,3 +53,7 @@ next-env.d.ts
 dev.log
 dev.pid
 package.json.backup
+
+# next-pwa generated service worker files (output of next build)
+/public/sw.js
+/public/workbox-*.js

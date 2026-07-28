@@ -4,7 +4,7 @@
   "description": "A Progressive Web App for tracking todos and workouts",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "background_color": "#111827",
   "theme_color": "#4f46e5",
   "icons": [
     {

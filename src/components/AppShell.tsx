@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { LayoutDashboard, CheckSquare, Dumbbell, LogOut, Activity, X } from 'lucide-react'
@@ -62,7 +62,8 @@ function SidebarBody({
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router   = useRouter()
-  const supabase = createClient()
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const handleLogout = async () => {

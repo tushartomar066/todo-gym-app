@@ -165,7 +165,71 @@ export async function getTodayWorkoutWithDetails() {
   return (data as Workout) || null
 }
 
-export async function getAllWorkoutsWithDetails() {
+export async function getInitialGymData(limit = 30) {
+  const { user, supabase } = await getUser()
+  const today = getTodayIST()
+
+  const [workoutsResult, namesResult] = await Promise.all([
+    supabase
+      .from('workouts')
+      .select(`*, exercises(*, sets(*))`)
+      .eq('user_id', user.id)
+      .order('date', { ascending: false })
+      .limit(limit),
+    supabase
+      .from('exercises')
+      .select(`name, workouts!inner(user_id)`)
+      .eq('workouts.user_id', user.id)
+      .order('name', { ascending: true }),
+  ])
+
+  if (workoutsResult.error) throw workoutsResult.error
+  if (namesResult.error) throw namesResult.error
+
+  const workouts = (workoutsResult.data as Workout[]) || []
+
+  const seen = new Set<string>()
+  const exerciseNames: string[] = []
+  for (const row of (namesResult.data as any[]) || []) {
+    if (row.name && !seen.has(row.name)) {
+      seen.add(row.name)
+      exerciseNames.push(row.name)
+    }
+  }
+
+  // Batch fetch previous-session data for all exercise names
+  const allNames = workouts.flatMap(w => (w.exercises || []).map((e: Exercise) => e.name))
+  const uniqueNames = [...new Set(allNames)]
+  let prevData = new Map<string, { exerciseName: string; sets: { weight: number | null; reps: number | null; set_type: SetType }[]; date: string | null }>()
+
+  if (uniqueNames.length > 0) {
+    const { data: prevRows, error: prevError } = await supabase
+      .from('exercises')
+      .select(`name, workout_id, workouts!inner(date, user_id), sets(weight, reps, set_type, is_completed)`)
+      .eq('workouts.user_id', user.id)
+      .in('name', uniqueNames)
+      .neq('workouts.date', today)
+      .order('date', { foreignTable: 'workouts', ascending: false })
+
+    if (!prevError && prevRows) {
+      const result = new Map<string, { exerciseName: string; sets: { weight: number | null; reps: number | null; set_type: SetType }[]; date: string | null }>()
+      for (const row of prevRows as any[]) {
+        const name: string = row.name
+        if (result.has(name)) continue
+        const sets = (row.sets as any[] | undefined)
+          ?.filter((s) => s.is_completed)
+          ?.map((s) => ({ weight: s.weight, reps: s.reps, set_type: s.set_type as SetType }))
+          ?? []
+        result.set(name, { exerciseName: name, sets, date: row.workouts?.date ?? null })
+      }
+      prevData = result
+    }
+  }
+
+  return { workouts, exerciseNames, prevData }
+}
+
+export async function getAllWorkoutsWithDetails(limit = 30) {
   const { user, supabase } = await getUser()
 
   const { data, error } = await supabase
@@ -181,6 +245,7 @@ export async function getAllWorkoutsWithDetails() {
     `)
     .eq('user_id', user.id)
     .order('date', { ascending: false })
+    .limit(limit)
 
   if (error) throw error
   return (data as Workout[]) || []
@@ -211,6 +276,7 @@ export async function getPersonalRecords(): Promise<PersonalRecord[]> {
     `)
     .eq('exercises.workouts.user_id', user.id)
     .not('weight', 'is', null)
+    .eq('is_completed', true)
 
   if (error) throw error
   if (!data) return []
@@ -234,25 +300,6 @@ export async function getPersonalRecords(): Promise<PersonalRecord[]> {
   }
 
   return Array.from(prMap.values()).sort((a, b) => a.exerciseName.localeCompare(b.exerciseName))
-}
-
-export async function startWorkout() {
-  const { user, supabase } = await getUser()
-  const today = getTodayIST()
-
-  const { data, error } = await supabase
-    .from('workouts')
-    .upsert(
-      { user_id: user.id, date: today },
-      { onConflict: 'user_id,date', ignoreDuplicates: false }
-    )
-    .select()
-    .single()
-
-  if (error) throw error
-  revalidatePath('/gym')
-  revalidatePath('/dashboard')
-  return (data as Workout) || null
 }
 
 export async function addExercise(name: string) {
@@ -583,61 +630,42 @@ export async function deleteExercise(exerciseId: string) {
   revalidatePath('/gym')
 }
 
-export async function completeWorkout(workoutId: string) {
-  const { user, supabase } = await getUser()
-
-  const { data: workout, error: workoutError } = await supabase
-    .from('workouts')
-    .select('*')
-    .eq('id', workoutId)
-    .eq('user_id', user.id)
-    .single()
-
-  if (workoutError || !workout) {
-    throw new Error('Workout not found or unauthorized')
-  }
-
-  revalidatePath('/gym')
-  revalidatePath('/dashboard')
-  return (workout as Workout) || null
-}
-
 export async function getDashboardData() {
   const { user, supabase } = await getUser()
   const today = getTodayIST()
-
-  const { data: tasks, error: tasksError } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('user_id', user.id)
-    .gte('created_at', today)
-    .lte('created_at', today + 'T23:59:59.999Z')
-
-  if (tasksError) throw tasksError
-
-  const { data: workout, error: workoutError } = await supabase
-    .from('workouts')
-    .select('*')
-    .eq('user_id', user.id)
-    .eq('date', today)
-    .single()
-
-  if (workoutError && workoutError.code !== 'PGRST116') {
-    throw workoutError
-  }
 
   const sevenDaysAgo = new Date()
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6)
   const weekStart = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(sevenDaysAgo)
 
-  const { data: weeklyTasks, error: weeklyError } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('user_id', user.id)
-    .gte('created_at', weekStart)
-    .lte('created_at', today + 'T23:59:59.999Z')
-    .order('created_at', { ascending: true })
+  const [
+    { data: tasks,       error: tasksError },
+    { data: workout,     error: workoutError },
+    { data: weeklyTasks, error: weeklyError },
+  ] = await Promise.all([
+    supabase
+      .from('tasks')
+      .select('*')
+      .eq('user_id', user.id)
+      .gte('created_at', today)
+      .lte('created_at', today + 'T23:59:59.999Z'),
+    supabase
+      .from('workouts')
+      .select('*, exercises(id)')
+      .eq('user_id', user.id)
+      .eq('date', today)
+      .single(),
+    supabase
+      .from('tasks')
+      .select('*')
+      .eq('user_id', user.id)
+      .gte('created_at', weekStart)
+      .lte('created_at', today + 'T23:59:59.999Z')
+      .order('created_at', { ascending: true }),
+  ])
 
+  if (tasksError) throw tasksError
+  if (workoutError && workoutError.code !== 'PGRST116') throw workoutError
   if (weeklyError) throw weeklyError
 
   return {
