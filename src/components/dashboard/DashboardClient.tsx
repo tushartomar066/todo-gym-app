@@ -3,9 +3,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { CheckCircle2, Dumbbell, TrendingUp, Circle } from 'lucide-react'
-import WeeklyProgressChart from '@/components/charts/WeeklyProgressChart'
 import WorkoutActions from '@/components/dashboard/WorkoutActions'
+
+const WeeklyProgressChart = dynamic(() => import('@/components/charts/WeeklyProgressChart'), {
+  ssr: false,
+  loading: () => <div className="h-full w-full animate-pulse rounded-lg bg-gray-800/40" />,
+})
 
 
 export interface DashboardClientProps {

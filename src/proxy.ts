@@ -2,23 +2,26 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const protectedPaths = ['/dashboard', '/todo', '/gym']
-
 export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl
-
   const response = NextResponse.next({ request })
+
+  const hasSupabaseCookie = request.cookies
+    .getAll()
+    .some(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'))
+
+  if (!hasSupabaseCookie) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/'
+    return NextResponse.redirect(url)
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    if (protectedPaths.some(p => pathname.startsWith(p))) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/'
-      return NextResponse.redirect(url)
-    }
-    return response
+    const url = request.nextUrl.clone()
+    url.pathname = '/'
+    return NextResponse.redirect(url)
   }
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
@@ -37,7 +40,7 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (protectedPaths.some(p => pathname.startsWith(p)) && !user) {
+  if (!user) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)
@@ -47,15 +50,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - sw.js, workbox-*.js (PWA files)
-     */
-    '/((?!api|_next/static|_next/image|favicon.ico|sw.js|workbox-.*\\.js).*)',
-  ],
+  matcher: ['/dashboard/:path*', '/todo/:path*', '/gym/:path*', '/cardio/:path*'],
 }
