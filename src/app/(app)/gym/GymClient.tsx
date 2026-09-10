@@ -430,7 +430,7 @@ export default function GymClient({ initialWorkouts, initialExerciseNames, initi
       return map
     })
     try {
-      await toggleSetComplete(setId)
+      await toggleSetComplete(setId, isCompleted)
       if (!isCompleted) { setRestSecs(REST_SECONDS); if (!startRef.current) startRef.current = Date.now() }
     } catch {
       setSetsMap(prev => {

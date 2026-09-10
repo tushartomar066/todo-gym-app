@@ -11,15 +11,15 @@ const EXERCISE_COLS = 'id, workout_id, name, notes, created_at, updated_at'
 const SET_COLS = 'id, exercise_id, weight, reps, is_completed, set_type, created_at, updated_at'
 const CARDIO_COLS = 'id, user_id, date, activity_type, duration_minutes, distance_km, steps, notes, created_at'
 
-async function getUser() {
+async function getAuth() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Unauthorized')
-  return { user, supabase }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.user) throw new Error('Unauthorized')
+  return { user: session.user, supabase }
 }
 
 export async function getTodayTasks() {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
   const { startUtc, endUtc } = istDayBounds(getTodayIST())
 
   const { data, error } = await supabase
@@ -35,7 +35,7 @@ export async function getTodayTasks() {
 }
 
 export async function getTasks(filter: 'all' | 'active' | 'completed' = 'all') {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
   let query = supabase.from('tasks').select(TASK_COLS).eq('user_id', user.id)
 
   if (filter === 'active') query = query.eq('is_completed', false)
@@ -47,7 +47,7 @@ export async function getTasks(filter: 'all' | 'active' | 'completed' = 'all') {
 }
 
 export async function addTask(title: string, priority: 'low' | 'medium' | 'high' = 'medium') {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { data, error } = await supabase
     .from('tasks')
@@ -56,13 +56,11 @@ export async function addTask(title: string, priority: 'low' | 'medium' | 'high'
     .single()
 
   if (error) throw error
-  revalidatePath('/todo')
-  revalidatePath('/dashboard')
   return (data as Task) || null
 }
 
 export async function toggleTaskComplete(id: string, isCompleted: boolean) {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { data, error } = await supabase
     .from('tasks')
@@ -73,13 +71,11 @@ export async function toggleTaskComplete(id: string, isCompleted: boolean) {
     .single()
 
   if (error) throw error
-  revalidatePath('/todo')
-  revalidatePath('/dashboard')
   return (data as Task) || null
 }
 
 export async function deleteTask(id: string) {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { error } = await supabase
     .from('tasks')
@@ -88,12 +84,10 @@ export async function deleteTask(id: string) {
     .eq('user_id', user.id)
 
   if (error) throw error
-  revalidatePath('/todo')
-  revalidatePath('/dashboard')
 }
 
 export async function getTodayWorkout() {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { data, error } = await supabase
     .from('workouts')
@@ -107,7 +101,7 @@ export async function getTodayWorkout() {
 }
 
 export async function getInitialGymData(limit = 30) {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
   const today = getTodayIST()
 
   const [workoutsResult, namesResult] = await Promise.all([
@@ -178,7 +172,7 @@ export interface PersonalRecord {
 }
 
 export async function getPersonalRecords(): Promise<PersonalRecord[]> {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { data, error } = await supabase
     .from('sets')
@@ -213,7 +207,7 @@ export async function getPersonalRecords(): Promise<PersonalRecord[]> {
 }
 
 export async function addExercise(name: string) {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { data: workout, error: workoutError } = await supabase
     .from('workouts')
@@ -230,24 +224,11 @@ export async function addExercise(name: string) {
     .single()
 
   if (error) throw error
-  revalidatePath('/gym')
   return (data as Exercise) || null
 }
 
 export async function addSet(exerciseId: string, weight: number, reps: number, setType: SetType = 'working') {
-  const { user, supabase } = await getUser()
-
-  const { data: exercise, error: exerciseError } = await supabase
-    .from('exercises')
-    .select('id, workouts!inner(user_id)')
-    .eq('id', exerciseId)
-    .single()
-
-  if (exerciseError || !exercise) throw new Error('Exercise not found')
-
-  const workouts = exercise.workouts as { user_id: string } | { user_id: string }[]
-  const workoutUserId = Array.isArray(workouts) ? workouts[0]?.user_id : workouts?.user_id
-  if (workoutUserId !== user.id) throw new Error('Unauthorized')
+  const { supabase } = await getAuth()
 
   const { data, error } = await supabase
     .from('sets')
@@ -256,24 +237,11 @@ export async function addSet(exerciseId: string, weight: number, reps: number, s
     .single()
 
   if (error) throw error
-  revalidatePath('/gym')
   return (data as WorkoutSet) || null
 }
 
 export async function updateExerciseNotes(exerciseId: string, notes: string | null) {
-  const { user, supabase } = await getUser()
-
-  const { data: exercise, error: exerciseError } = await supabase
-    .from('exercises')
-    .select('id, workouts!inner(user_id)')
-    .eq('id', exerciseId)
-    .single()
-
-  if (exerciseError || !exercise) throw new Error('Exercise not found')
-
-  const workouts = exercise.workouts as { user_id: string } | { user_id: string }[]
-  const workoutUserId = Array.isArray(workouts) ? workouts[0]?.user_id : workouts?.user_id
-  if (workoutUserId !== user.id) throw new Error('Unauthorized')
+  const { supabase } = await getAuth()
 
   const { error } = await supabase
     .from('exercises')
@@ -281,11 +249,10 @@ export async function updateExerciseNotes(exerciseId: string, notes: string | nu
     .eq('id', exerciseId)
 
   if (error) throw error
-  revalidatePath('/gym')
 }
 
 export async function getPreviousExerciseDataBatch(exerciseNames: string[]) {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
   const today = getTodayIST()
 
   if (exerciseNames.length === 0) return new Map()
@@ -318,79 +285,36 @@ export async function getPreviousExerciseDataBatch(exerciseNames: string[]) {
   return result
 }
 
-export async function toggleSetComplete(id: string) {
-  const { user, supabase } = await getUser()
-
-  const { data: set, error: setError } = await supabase
-    .from('sets')
-    .select('id, is_completed, exercises!inner(workouts!inner(user_id))')
-    .eq('id', id)
-    .single()
-
-  if (setError || !set) throw new Error('Set not found')
-
-  const exercises = set.exercises as { workouts: { user_id: string } | { user_id: string }[] } | { workouts: { user_id: string } | { user_id: string }[] }[]
-  const exerciseObj = Array.isArray(exercises) ? exercises[0] : exercises
-  const workouts = exerciseObj?.workouts
-  const workoutUserId = Array.isArray(workouts) ? workouts[0]?.user_id : workouts?.user_id
-  if (workoutUserId !== user.id) throw new Error('Unauthorized')
+export async function toggleSetComplete(id: string, currentIsCompleted: boolean) {
+  const { supabase } = await getAuth()
 
   const { data, error } = await supabase
     .from('sets')
-    .update({ is_completed: !set.is_completed })
+    .update({ is_completed: !currentIsCompleted })
     .eq('id', id)
     .select(SET_COLS)
     .single()
 
   if (error) throw error
-  revalidatePath('/gym')
   return (data as WorkoutSet) || null
 }
 
 export async function deleteSet(setId: string) {
-  const { user, supabase } = await getUser()
-
-  const { data: set, error: setError } = await supabase
-    .from('sets')
-    .select('id, exercises!inner(workouts!inner(user_id))')
-    .eq('id', setId)
-    .single()
-
-  if (setError || !set) throw new Error('Set not found')
-
-  const exercises = set.exercises as { workouts: { user_id: string } | { user_id: string }[] } | { workouts: { user_id: string } | { user_id: string }[] }[]
-  const exerciseObj = Array.isArray(exercises) ? exercises[0] : exercises
-  const workouts = exerciseObj?.workouts
-  const workoutUserId = Array.isArray(workouts) ? workouts[0]?.user_id : workouts?.user_id
-  if (workoutUserId !== user.id) throw new Error('Unauthorized')
+  const { supabase } = await getAuth()
 
   const { error } = await supabase.from('sets').delete().eq('id', setId)
   if (error) throw error
-  revalidatePath('/gym')
 }
 
 export async function deleteExercise(exerciseId: string) {
-  const { user, supabase } = await getUser()
-
-  const { data: exercise, error: setError } = await supabase
-    .from('exercises')
-    .select('id, workouts!inner(user_id)')
-    .eq('id', exerciseId)
-    .single()
-
-  if (setError || !exercise) throw new Error('Exercise not found')
-
-  const workouts = exercise.workouts as { user_id: string } | { user_id: string }[]
-  const workoutUserId = Array.isArray(workouts) ? workouts[0]?.user_id : workouts?.user_id
-  if (workoutUserId !== user.id) throw new Error('Unauthorized')
+  const { supabase } = await getAuth()
 
   const { error } = await supabase.from('exercises').delete().eq('id', exerciseId)
   if (error) throw error
-  revalidatePath('/gym')
 }
 
 export async function addExerciseToDate(name: string, date: string) {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { data: workout, error: workoutError } = await supabase
     .from('workouts')
@@ -407,26 +331,17 @@ export async function addExerciseToDate(name: string, date: string) {
     .single()
 
   if (error) throw error
-  revalidatePath('/gym')
   return data as Exercise
 }
 
 export async function markAllSetsComplete(workoutId: string) {
-  const { user, supabase } = await getUser()
-
-  const { data: workout, error: woErr } = await supabase
-    .from('workouts')
-    .select('id, user_id')
-    .eq('id', workoutId)
-    .single()
-
-  if (woErr || !workout) throw new Error('Workout not found')
-  if ((workout as { user_id: string }).user_id !== user.id) throw new Error('Unauthorized')
+  const { user, supabase } = await getAuth()
 
   const { data: exercises, error: exErr } = await supabase
     .from('exercises')
-    .select('id')
+    .select('id, workouts!inner(user_id)')
     .eq('workout_id', workoutId)
+    .eq('workouts.user_id', user.id)
 
   if (exErr) throw exErr
   const exIds = (exercises as { id: string }[]).map(e => e.id)
@@ -438,24 +353,14 @@ export async function markAllSetsComplete(workoutId: string) {
 }
 
 export async function deleteWorkout(workoutId: string) {
-  const { user, supabase } = await getUser()
-
-  const { data: workout, error: woErr } = await supabase
-    .from('workouts')
-    .select('id, user_id')
-    .eq('id', workoutId)
-    .single()
-
-  if (woErr || !workout) throw new Error('Workout not found')
-  if ((workout as { user_id: string }).user_id !== user.id) throw new Error('Unauthorized')
+  const { supabase } = await getAuth()
 
   const { error } = await supabase.from('workouts').delete().eq('id', workoutId)
   if (error) throw error
-  revalidatePath('/gym')
 }
 
 export async function getDashboardData() {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
   const today = getTodayIST()
   const { startUtc: todayStart, endUtc: todayEnd } = istDayBounds(today)
 
@@ -502,7 +407,7 @@ export async function getDashboardData() {
 }
 
 export async function getCardioLogs(): Promise<CardioLog[]> {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { data, error } = await supabase
     .from('cardio_logs')
@@ -523,7 +428,7 @@ export async function addCardioLog(
   steps?: number | null,
   notes?: string | null,
 ): Promise<CardioLog> {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { data, error } = await supabase
     .from('cardio_logs')
@@ -540,7 +445,6 @@ export async function addCardioLog(
     .single()
 
   if (error) throw error
-  revalidatePath('/cardio')
   return data as CardioLog
 }
 
@@ -555,7 +459,7 @@ export async function updateCardioLog(
     notes?: string | null
   },
 ): Promise<CardioLog> {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const update: Record<string, unknown> = {}
   if (patch.activity_type !== undefined) update.activity_type = patch.activity_type
@@ -574,12 +478,11 @@ export async function updateCardioLog(
     .single()
 
   if (error) throw error
-  revalidatePath('/cardio')
   return data as CardioLog
 }
 
 export async function deleteCardioLog(id: string): Promise<void> {
-  const { user, supabase } = await getUser()
+  const { user, supabase } = await getAuth()
 
   const { error } = await supabase
     .from('cardio_logs')
@@ -588,5 +491,4 @@ export async function deleteCardioLog(id: string): Promise<void> {
     .eq('user_id', user.id)
 
   if (error) throw error
-  revalidatePath('/cardio')
 }
